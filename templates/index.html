@@ -327,14 +327,37 @@ function toggleEdit(idx) {
   document.getElementById('edit-' + idx).classList.toggle('active');
 }
 
+// Modal helpers
+function openModal(id)  { document.getElementById(id).classList.add('active'); }
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+function closeModalIfBg(e, id) { if (e.target === e.currentTarget) closeModal(id); }
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape')
+    document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+});
+
+// Force iperf3 bandwidth test
+function triggerIperf3(idx) {
+  const btn = document.getElementById('run-' + idx);
+  if (!btn || btn.classList.contains('running')) return;
+  btn.classList.add('running');
+  btn.disabled = true;
+  fetch('/hosts/' + idx + '/trigger-iperf3', { method: 'POST' })
+    .then(r => r.json())
+    .then(() => { setTimeout(() => { btn.classList.remove('running'); btn.disabled = false; }, 3000); })
+    .catch(() => { btn.classList.remove('running'); btn.disabled = false; });
+}
+
 // Auto-refresh dashboard every 5 s
 function refreshDashboard() {
+  const tbody = document.getElementById('host-rows');
+  // Don't disrupt the user while they're typing in the table
+  if (tbody.contains(document.activeElement)) return;
+
   fetch('/api/status')
     .then(r => r.json())
     .then(data => {
       const thr = data.thresholds || {};
-      const tbody = document.getElementById('host-rows');
-      // Save which edit rows are open so we can restore them after rebuild
       // Save the entire DOM nodes of any open edit rows (preserves user's typed values)
       const savedEditRows = new Map();
       tbody.querySelectorAll('.edit-row.active').forEach(el => savedEditRows.set(el.id, el.cloneNode(true)));
@@ -390,11 +413,12 @@ function refreshDashboard() {
         html += '<td class="' + cls(ul, bw, bc, true) + '">' + fmt(ul, '', 0) + '</td>';
         html += '<td class="spark">——————————</td>';
         html += '<td>';
+        if (h.iperf3) html += '<button class="btn-sm btn-run" id="run-'+i+'" onclick="triggerIperf3('+i+')" title="Run bandwidth test now">⚡</button> ';
         html += '<button class="btn-sm btn-edit" onclick="toggleEdit('+i+')">✎</button> ';
         html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(\'Delete '+name+'?\')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
         html += '</td></tr>';
 
-        // edit row placeholder (keep existing inline edit form)
+        // edit row placeholder
         html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="12">';
         html += '<form method="POST" action="/hosts/'+i+'/edit" class="edit-form">';
         html += '<div class="form-group"><label>Name</label><input name="name" value="'+h.name+'" required></div>';

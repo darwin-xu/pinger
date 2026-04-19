@@ -13,7 +13,7 @@ thresholds:
   bw_warn_mbps: 50
   bw_crit_mbps: 10
 hosts:
-- name: goo
+- name: google
   host: 35.234.22.51
   ssh_user: darwin
   ssh_port: 22
