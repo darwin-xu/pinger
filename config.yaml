@@ -40,5 +40,4 @@ hosts:
   host: 158.247.227.13
   ssh_user: root
   ssh_port: 22
-  iperf3: true
   password: REDACTED

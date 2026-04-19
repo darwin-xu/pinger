@@ -83,6 +83,23 @@
   }
   .checkbox-group input[type="checkbox"] { accent-color: var(--cyan); }
 
+  /* ── Settings inline grid (label + input on same row) ── */
+  .settings-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 12px;
+    align-items: center;
+  }
+  .settings-grid label {
+    font-size: 0.85rem; color: var(--text-dim);
+  }
+  .settings-grid input {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 8px; border-radius: 4px; font-size: 0.9rem;
+    width: 90px; text-align: right;
+  }
+  .settings-grid input:focus { outline: none; border-color: var(--cyan); }
+
   .btn {
     border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer;
     font-size: 0.9rem; font-weight: 500;
@@ -288,35 +305,34 @@
     <button class="modal-close" onclick="closeModal('modal-settings')">✕</button>
     <h2>Settings</h2>
     <form method="POST" action="/settings">
-      <div class="form-grid">
-        <div class="form-group"><label>Probe interval (s)</label>
-          <input name="probe_interval" type="number" value="{{ settings.probe_interval }}"></div>
-        <div class="form-group"><label>Ping count</label>
-          <input name="ping_count" type="number" value="{{ settings.ping_count }}"></div>
-        <div class="form-group"><label>iperf3 duration (s)</label>
-          <input name="iperf3_duration" type="number" value="{{ settings.iperf3_duration }}"></div>
-        <div class="form-group"><label>iperf3 port</label>
-          <input name="iperf3_port" type="number" value="{{ settings.iperf3_port }}"></div>
+      <div class="settings-grid">
+        <label>Probe interval (s)</label>
+          <input name="probe_interval" type="number" value="{{ settings.probe_interval }}">
+        <label>Ping count</label>
+          <input name="ping_count" type="number" value="{{ settings.ping_count }}">
+        <label>iperf3 duration (s)</label>
+          <input name="iperf3_duration" type="number" value="{{ settings.iperf3_duration }}">
+        <label>iperf3 port</label>
+          <input name="iperf3_port" type="number" value="{{ settings.iperf3_port }}">
       </div>
-      <br>
-      <h3 style="font-size:0.95rem; color:var(--text-dim); margin-bottom:12px;">Thresholds</h3>
-      <div class="form-grid">
-        <div class="form-group"><label>Ping warn (ms)</label>
-          <input name="ping_warn_ms" type="number" value="{{ thresholds.get('ping_warn_ms', 100) }}"></div>
-        <div class="form-group"><label>Ping crit (ms)</label>
-          <input name="ping_crit_ms" type="number" value="{{ thresholds.get('ping_crit_ms', 300) }}"></div>
-        <div class="form-group"><label>Loss warn (%)</label>
-          <input name="loss_warn_pct" type="number" value="{{ thresholds.get('loss_warn_pct', 1) }}"></div>
-        <div class="form-group"><label>Loss crit (%)</label>
-          <input name="loss_crit_pct" type="number" value="{{ thresholds.get('loss_crit_pct', 5) }}"></div>
-        <div class="form-group"><label>TCP warn (ms)</label>
-          <input name="tcp_warn_ms" type="number" value="{{ thresholds.get('tcp_warn_ms', 150) }}"></div>
-        <div class="form-group"><label>TCP crit (ms)</label>
-          <input name="tcp_crit_ms" type="number" value="{{ thresholds.get('tcp_crit_ms', 500) }}"></div>
-        <div class="form-group"><label>BW warn (Mbps)</label>
-          <input name="bw_warn_mbps" type="number" value="{{ thresholds.get('bw_warn_mbps', 50) }}"></div>
-        <div class="form-group"><label>BW crit (Mbps)</label>
-          <input name="bw_crit_mbps" type="number" value="{{ thresholds.get('bw_crit_mbps', 10) }}"></div>
+      <h3 style="font-size:0.95rem; color:var(--text-dim); margin:14px 0 10px;">Thresholds</h3>
+      <div class="settings-grid">
+        <label>Ping warn (ms)</label>
+          <input name="ping_warn_ms" type="number" value="{{ thresholds.get('ping_warn_ms', 100) }}">
+        <label>Ping crit (ms)</label>
+          <input name="ping_crit_ms" type="number" value="{{ thresholds.get('ping_crit_ms', 300) }}">
+        <label>Loss warn (%)</label>
+          <input name="loss_warn_pct" type="number" value="{{ thresholds.get('loss_warn_pct', 1) }}">
+        <label>Loss crit (%)</label>
+          <input name="loss_crit_pct" type="number" value="{{ thresholds.get('loss_crit_pct', 5) }}">
+        <label>TCP warn (ms)</label>
+          <input name="tcp_warn_ms" type="number" value="{{ thresholds.get('tcp_warn_ms', 150) }}">
+        <label>TCP crit (ms)</label>
+          <input name="tcp_crit_ms" type="number" value="{{ thresholds.get('tcp_crit_ms', 500) }}">
+        <label>BW warn (Mbps)</label>
+          <input name="bw_warn_mbps" type="number" value="{{ thresholds.get('bw_warn_mbps', 50) }}">
+        <label>BW crit (Mbps)</label>
+          <input name="bw_crit_mbps" type="number" value="{{ thresholds.get('bw_crit_mbps', 10) }}">
       </div>
       <br>
       <button type="submit" class="btn btn-primary">Save Settings</button>
@@ -429,7 +445,7 @@ function renderChart(name, tab) {
     datasets = [
       { label: 'Loss (%)', data: rows.map((r,i) => ({x: ts(rows)[i], y: r.loss ?? null})), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true, tension: 0.3, spanGaps: true, yAxisID: 'y' },
     ];
-    yScales = { y: { min: 0, title: { display: true, text: '%', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
+    yScales = { y: { min: 0, max: 100, title: { display: true, text: '%', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
   }
 
   const ctx = document.getElementById('history-chart').getContext('2d');
