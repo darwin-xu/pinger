@@ -45,7 +45,6 @@
   .val-red    { color: var(--red); }
   .val-dim    { color: var(--text-dim); }
   .icon       { font-size: 1.1rem; text-align: center; }
-  .spark      { font-family: monospace; color: var(--cyan); letter-spacing: -1px; }
   .host-col   { color: var(--text-dim); font-size: 0.85rem; }
 
   /* ── Actions column ─────────────────────────────────── */
@@ -186,7 +185,7 @@
   <tr>
     <th>#</th><th>Name</th><th>Host</th><th></th>
     <th>Ping avg</th><th>Jitter</th><th>Loss</th><th>TCP RTT</th>
-    <th>↓ Mbps</th><th>↑ Mbps</th><th title="Mini sparkline of the last 10 ping latency measurements">Trend</th><th></th>
+    <th>↓ Mbps</th><th>↑ Mbps</th><th></th>
   </tr>
 </thead>
 <tbody id="host-rows">
@@ -213,7 +212,6 @@
   <td>{{ ('%0.1f ms' % t.rtt) if t.get('success') and t.rtt is not none else '—' }}</td>
   <td>{{ ('%0.0f' % ip.download_mbps) if ip.get('success') and ip.download_mbps is not none else '—' }}</td>
   <td>{{ ('%0.0f' % ip.upload_mbps) if ip.get('success') and ip.upload_mbps is not none else '—' }}</td>
-  <td class="spark">{{ ''.join(history.get(name, [])|map('string')|list)[:10] if history.get(name) else '——————————' }}</td>
   <td onclick="event.stopPropagation()">
     <button class="btn-sm btn-run" id="run-{{ loop.index0 }}" onclick="triggerIperf3({{ loop.index0 }})" title="Run bandwidth test now">⚡</button>
     <button class="btn-sm btn-edit" onclick="toggleEdit({{ loop.index0 }})">✎</button>
@@ -225,7 +223,7 @@
 </tr>
 <!-- inline edit row -->
 <tr class="edit-row" id="edit-{{ loop.index0 }}">
-<td colspan="12">
+<td colspan="11">
   <form method="POST" action="/hosts/{{ loop.index0 }}/edit" class="edit-form">
     <div class="form-group"><label>Name</label>
       <input name="name" value="{{ h.name }}" required></div>
@@ -259,7 +257,7 @@
   <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;height:300px">
     <canvas id="history-chart"></canvas>
   </div>
-</div> ────────────────────────────────────────────────────── -->
+</div>
 <div class="modal-overlay" id="modal-add" onclick="closeModalIfBg(event, 'modal-add')">
   <div class="modal">
     <button class="modal-close" onclick="closeModal('modal-add')">✕</button>
@@ -330,6 +328,8 @@
 <script>
 // ── Chart state ───────────────────────────────────────────────────────────────
 let _chart = null;
+let _chartHost = null;
+let _chartTab  = null;
 let _selectedHost = null;
 let _selectedIdx  = null;
 let _historyCache = {};
@@ -433,7 +433,15 @@ function renderChart(name, tab) {
   }
 
   const ctx = document.getElementById('history-chart').getContext('2d');
+  // If the same host+tab is already showing, update data in place (no animation).
+  if (_chart && _chartHost === name && _chartTab === tab) {
+    _chart.data.datasets = datasets;
+    _chart.update('none');
+    return;
+  }
   if (_chart) { _chart.destroy(); _chart = null; }
+  _chartHost = name;
+  _chartTab  = tab;
   _chart = new Chart(ctx, {
     type: 'line',
     data: { datasets },
@@ -519,14 +527,13 @@ function refreshDashboard() {
         html += '<td class="' + cls(rtt, tw, tc) + '">'           + fmt(rtt, ' ms')  + '</td>';
         html += '<td class="' + cls(dl, bw, bc, true) + '">'      + fmt(dl, '', 0)   + '</td>';
         html += '<td class="' + cls(ul, bw, bc, true) + '">'      + fmt(ul, '', 0)   + '</td>';
-        html += '<td class="spark">——————————</td>';
         html += '<td onclick="event.stopPropagation()">';
         html += '<button class="btn-sm btn-run" id="run-'+i+'" onclick="triggerIperf3('+i+')" title="Run bandwidth test now">⚡</button> ';
         html += '<button class="btn-sm btn-edit" onclick="toggleEdit('+i+')">✎</button> ';
         html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(\'Delete '+safeName+'?\')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
         html += '</td></tr>';
 
-        html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="12">';
+        html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="11">';
         html += '<form method="POST" action="/hosts/'+i+'/edit" class="edit-form">';
         html += '<div class="form-group"><label>Name</label><input name="name" value="'+h.name+'" required></div>';
         html += '<div class="form-group"><label>Host</label><input name="host" value="'+h.host+'" required></div>';
