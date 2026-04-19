@@ -14,6 +14,7 @@ Background probe threads start automatically on launch.
 from __future__ import annotations
 
 import argparse
+import threading
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 
@@ -80,9 +81,9 @@ def add_host():
         "ssh_port": int(request.form.get("ssh_port") or 22),
         "iperf3":   "iperf3" in request.form,
     }
-    ssh_key = request.form.get("ssh_key", "").strip()
-    if ssh_key:
-        host_entry["ssh_key"] = ssh_key
+    password = request.form.get("password", "").strip()
+    if password:
+        host_entry["password"] = password
 
     if "hosts" not in cfg:
         cfg["hosts"] = []
@@ -104,9 +105,11 @@ def edit_host(idx: int):
             "ssh_port": int(request.form.get("ssh_port") or 22),
             "iperf3":   "iperf3" in request.form,
         }
-        ssh_key = request.form.get("ssh_key", "").strip()
-        if ssh_key:
-            hosts[idx]["ssh_key"] = ssh_key
+        password = request.form.get("password", "").strip()
+        if password:
+            hosts[idx]["password"] = password
+        else:
+            hosts[idx].pop("password", None)
         save_config(cfg)
         engine.reload_config(cfg)
     return redirect(url_for("index"))
@@ -121,6 +124,21 @@ def delete_host(idx: int):
         save_config(cfg)
         engine.reload_config(cfg)
     return redirect(url_for("index"))
+
+
+@app.route("/hosts/<int:idx>/trigger-iperf3", methods=["POST"])
+def trigger_iperf3(idx: int):
+    cfg = _cfg()
+    hosts = cfg.get("hosts", [])
+    if not (0 <= idx < len(hosts)):
+        return jsonify(ok=False, error="host not found"), 404
+    h = hosts[idx]
+    if not h.get("iperf3"):
+        return jsonify(ok=False, error="iperf3 disabled for this host"), 400
+    threading.Thread(
+        target=engine._probe_iperf3, args=(h,), daemon=True, name=f"iperf3-manual-{idx}"
+    ).start()
+    return jsonify(ok=True)
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────
