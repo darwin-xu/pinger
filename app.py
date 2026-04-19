@@ -1,0 +1,170 @@
+"""pinger — Flask web UI + background probes.
+
+Usage
+─────
+  python app.py [--port 8080]
+
+Opens http://localhost:8080 with:
+  - Live dashboard (auto-refreshing)
+  - Host configuration page (add / edit / remove VPS)
+  - Settings page (intervals, thresholds)
+
+Background probe threads start automatically on launch.
+"""
+from __future__ import annotations
+
+import argparse
+
+from flask import Flask, jsonify, redirect, render_template, request, url_for
+
+from engine import ProbeEngine, load_config, save_config
+
+app = Flask(__name__)
+
+# Global engine reference (initialised in main)
+engine: ProbeEngine | None = None
+
+
+def _cfg() -> dict:
+    assert engine is not None
+    return engine.cfg
+
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    cfg = _cfg()
+    snap_r, snap_h = engine.snapshot()
+    return render_template(
+        "index.html",
+        hosts=cfg.get("hosts", []),
+        thresholds=cfg.get("thresholds", {}),
+        results=snap_r,
+        history=snap_h,
+        settings={
+            "probe_interval": cfg.get("probe_interval", 30),
+            "iperf3_interval": cfg.get("iperf3_interval", 300),
+            "ping_count": cfg.get("ping_count", 10),
+            "iperf3_duration": cfg.get("iperf3_duration", 5),
+            "iperf3_port": cfg.get("iperf3_port", 5201),
+        },
+        running=engine.running,
+    )
+
+
+# ── JSON API for live refresh ─────────────────────────────────────────────────
+
+@app.route("/api/status")
+def api_status():
+    cfg = _cfg()
+    snap_r, snap_h = engine.snapshot()
+    return jsonify(
+        hosts=cfg.get("hosts", []),
+        thresholds=cfg.get("thresholds", {}),
+        results=snap_r,
+        history=snap_h,
+        running=engine.running,
+    )
+
+
+# ── Host CRUD ─────────────────────────────────────────────────────────────────
+
+@app.route("/hosts/add", methods=["POST"])
+def add_host():
+    cfg = _cfg()
+    host_entry = {
+        "name":     request.form["name"].strip(),
+        "host":     request.form["host"].strip(),
+        "ssh_user": request.form["ssh_user"].strip(),
+        "ssh_port": int(request.form.get("ssh_port") or 22),
+        "iperf3":   "iperf3" in request.form,
+    }
+    ssh_key = request.form.get("ssh_key", "").strip()
+    if ssh_key:
+        host_entry["ssh_key"] = ssh_key
+
+    if "hosts" not in cfg:
+        cfg["hosts"] = []
+    cfg["hosts"].append(host_entry)
+    save_config(cfg)
+    engine.reload_config(cfg)
+    return redirect(url_for("index"))
+
+
+@app.route("/hosts/<int:idx>/edit", methods=["POST"])
+def edit_host(idx: int):
+    cfg = _cfg()
+    hosts = cfg.get("hosts", [])
+    if 0 <= idx < len(hosts):
+        hosts[idx] = {
+            "name":     request.form["name"].strip(),
+            "host":     request.form["host"].strip(),
+            "ssh_user": request.form["ssh_user"].strip(),
+            "ssh_port": int(request.form.get("ssh_port") or 22),
+            "iperf3":   "iperf3" in request.form,
+        }
+        ssh_key = request.form.get("ssh_key", "").strip()
+        if ssh_key:
+            hosts[idx]["ssh_key"] = ssh_key
+        save_config(cfg)
+        engine.reload_config(cfg)
+    return redirect(url_for("index"))
+
+
+@app.route("/hosts/<int:idx>/delete", methods=["POST"])
+def delete_host(idx: int):
+    cfg = _cfg()
+    hosts = cfg.get("hosts", [])
+    if 0 <= idx < len(hosts):
+        hosts.pop(idx)
+        save_config(cfg)
+        engine.reload_config(cfg)
+    return redirect(url_for("index"))
+
+
+# ── Settings ──────────────────────────────────────────────────────────────────
+
+@app.route("/settings", methods=["POST"])
+def update_settings():
+    cfg = _cfg()
+    for key in ("probe_interval", "iperf3_interval", "ping_count",
+                "iperf3_duration", "iperf3_port"):
+        val = request.form.get(key)
+        if val is not None:
+            cfg[key] = int(val)
+
+    if "thresholds" not in cfg:
+        cfg["thresholds"] = {}
+    for key in ("ping_warn_ms", "ping_crit_ms", "loss_warn_pct", "loss_crit_pct",
+                "tcp_warn_ms", "tcp_crit_ms", "bw_warn_mbps", "bw_crit_mbps"):
+        val = request.form.get(key)
+        if val is not None:
+            cfg["thresholds"][key] = int(val)
+
+    save_config(cfg)
+    engine.reload_config(cfg)
+    return redirect(url_for("index"))
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+def main() -> None:
+    global engine
+
+    parser = argparse.ArgumentParser(description="pinger web UI")
+    parser.add_argument("--port", type=int, default=8080, help="Web UI port (default: 8080)")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
+    parser.add_argument("--config", default="config.yaml", help="Config file path")
+    args = parser.parse_args()
+
+    cfg = load_config(args.config)
+    engine = ProbeEngine(cfg)
+    engine.start()
+
+    print(f"Dashboard: http://{args.host}:{args.port}")
+    app.run(host=args.host, port=args.port, debug=False)
+
+
+if __name__ == "__main__":
+    main()

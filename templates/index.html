@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pinger — VPS Network Monitor</title>
+<style>
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --border:   #30363d;
+    --text:     #c9d1d9;
+    --text-dim: #8b949e;
+    --green:    #3fb950;
+    --yellow:   #d29922;
+    --red:      #f85149;
+    --cyan:     #58a6ff;
+    --radius:   8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.5rem; color: var(--cyan); margin-bottom: 4px; }
+  .subtitle { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 24px; }
+  .subtitle .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 6px; vertical-align: middle; }
+  .dot.on  { background: var(--green); }
+  .dot.off { background: var(--red); }
+
+  /* ── Table ──────────────────────────────────────────── */
+  table { width: 100%; border-collapse: collapse; margin-bottom: 32px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--cyan); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;
+    background: var(--surface); position: sticky; top: 0; }
+  td { font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+  tr:hover td { background: rgba(88,166,255,0.05); }
+
+  .val-green  { color: var(--green); }
+  .val-yellow { color: var(--yellow); }
+  .val-red    { color: var(--red); }
+  .val-dim    { color: var(--text-dim); }
+  .icon       { font-size: 1.1rem; text-align: center; }
+  .spark      { font-family: monospace; color: var(--cyan); letter-spacing: -1px; }
+  .host-col   { color: var(--text-dim); font-size: 0.85rem; }
+
+  /* ── Actions column ─────────────────────────────────── */
+  .btn-sm {
+    border: none; background: transparent; cursor: pointer;
+    font-size: 0.85rem; padding: 2px 6px; border-radius: 4px;
+  }
+  .btn-edit   { color: var(--cyan); }
+  .btn-delete { color: var(--red); }
+  .btn-sm:hover { background: var(--border); }
+
+  /* ── Sections ───────────────────────────────────────── */
+  .section { background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; margin-bottom: 24px; }
+  .section h2 { font-size: 1.1rem; margin-bottom: 16px; color: var(--cyan); }
+
+  /* ── Forms ──────────────────────────────────────────── */
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+    align-items: end;
+  }
+  .form-group { display: flex; flex-direction: column; }
+  .form-group label {
+    font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase;
+    letter-spacing: 0.04em; margin-bottom: 4px;
+  }
+  .form-group input, .form-group select {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 6px 10px; border-radius: 4px; font-size: 0.9rem;
+  }
+  .form-group input:focus { outline: none; border-color: var(--cyan); }
+  .checkbox-group {
+    display: flex; align-items: center; gap: 6px; padding-top: 6px;
+  }
+  .checkbox-group input[type="checkbox"] { accent-color: var(--cyan); }
+
+  .btn {
+    border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer;
+    font-size: 0.9rem; font-weight: 500;
+  }
+  .btn-primary   { background: var(--cyan); color: var(--bg); }
+  .btn-primary:hover { opacity: 0.85; }
+  .btn-secondary { background: var(--border); color: var(--text); }
+
+  /* ── Edit modal (inline) ────────────────────────────── */
+  .edit-row { display: none; }
+  .edit-row.active { display: table-row; }
+  .edit-row td { background: var(--surface); padding: 12px; }
+  .edit-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+  .edit-form .form-group { min-width: 120px; }
+
+  /* ── Responsive ─────────────────────────────────────── */
+  @media (max-width: 900px) {
+    body { padding: 12px; }
+    .form-grid { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>pinger</h1>
+<p class="subtitle">
+  <span class="dot {{ 'on' if running else 'off' }}"></span>
+  Probes {{ "running" if running else "stopped" }}
+  · <span id="clock"></span>
+</p>
+
+<!-- ── Dashboard table ──────────────────────────────────────────────────── -->
+<table id="dashboard">
+<thead>
+  <tr>
+    <th>#</th><th>Name</th><th>Host</th><th></th>
+    <th>Ping avg</th><th>Jitter</th><th>Loss</th><th>TCP RTT</th>
+    <th>↓ Mbps</th><th>↑ Mbps</th><th>Trend</th><th>Updated</th><th></th>
+  </tr>
+</thead>
+<tbody id="host-rows">
+{% for h in hosts %}
+{% set name = h.name %}
+{% set r = results.get(name, {}) %}
+{% set p = r.get('ping', {}) %}
+{% set t = r.get('tcp', {}) %}
+{% set ip = r.get('iperf3', {}) %}
+<tr>
+  <td class="val-dim">{{ loop.index }}</td>
+  <td><strong>{{ name }}</strong></td>
+  <td class="host-col">{{ h.host }}</td>
+  <td class="icon">
+    {% if not p %}?
+    {% elif not p.get('success') or p.get('loss', 100) >= 50 %}<span class="val-red">✗</span>
+    {% elif p.get('loss', 0) >= 1 or not t.get('success') %}<span class="val-yellow">⚠</span>
+    {% else %}<span class="val-green">✓</span>
+    {% endif %}
+  </td>
+  <td>{{ ('%0.1f ms' % p.avg) if p.get('success') and p.avg is not none else '—' }}</td>
+  <td>{{ ('%0.1f ms' % p.jitter) if p.get('success') and p.jitter is not none else '—' }}</td>
+  <td>{{ ('%0.1f%%' % p.loss) if p.loss is defined and p.loss is not none else '—' }}</td>
+  <td>{{ ('%0.1f ms' % t.rtt) if t.get('success') and t.rtt is not none else '—' }}</td>
+  <td>{{ ('%0.0f' % ip.download_mbps) if ip.get('success') and ip.download_mbps is not none else '—' }}</td>
+  <td>{{ ('%0.0f' % ip.upload_mbps) if ip.get('success') and ip.upload_mbps is not none else '—' }}</td>
+  <td class="spark">{{ ''.join(history.get(name, [])|map('string')|list)[:10] if history.get(name) else '——————————' }}</td>
+  <td class="val-dim">{{ p.get('ts', '—')[-8:] if p.get('ts') else '—' }}</td>
+  <td>
+    <button class="btn-sm btn-edit" onclick="toggleEdit({{ loop.index0 }})">✎</button>
+    <form method="POST" action="/hosts/{{ loop.index0 }}/delete" style="display:inline"
+          onsubmit="return confirm('Delete {{ name }}?')">
+      <button class="btn-sm btn-delete" type="submit">✕</button>
+    </form>
+  </td>
+</tr>
+<!-- inline edit row -->
+<tr class="edit-row" id="edit-{{ loop.index0 }}">
+<td colspan="13">
+  <form method="POST" action="/hosts/{{ loop.index0 }}/edit" class="edit-form">
+    <div class="form-group"><label>Name</label>
+      <input name="name" value="{{ h.name }}" required></div>
+    <div class="form-group"><label>Host</label>
+      <input name="host" value="{{ h.host }}" required></div>
+    <div class="form-group"><label>SSH User</label>
+      <input name="ssh_user" value="{{ h.ssh_user }}"></div>
+    <div class="form-group"><label>SSH Port</label>
+      <input name="ssh_port" type="number" value="{{ h.get('ssh_port', 22) }}"></div>
+    <div class="form-group"><label>SSH Key</label>
+      <input name="ssh_key" value="{{ h.get('ssh_key', '') }}" placeholder="~/.ssh/id_rsa"></div>
+    <div class="checkbox-group">
+      <input type="checkbox" name="iperf3" id="edit-iperf3-{{ loop.index0 }}" {{ 'checked' if h.get('iperf3') }}>
+      <label for="edit-iperf3-{{ loop.index0 }}">iperf3</label>
+    </div>
+    <button type="submit" class="btn btn-primary">Save</button>
+    <button type="button" class="btn btn-secondary" onclick="toggleEdit({{ loop.index0 }})">Cancel</button>
+  </form>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+
+<!-- ── Add Host ──────────────────────────────────────────────────────────── -->
+<div class="section">
+  <h2>Add Host</h2>
+  <form method="POST" action="/hosts/add">
+    <div class="form-grid">
+      <div class="form-group"><label>Name</label>
+        <input name="name" placeholder="Tokyo-1" required></div>
+      <div class="form-group"><label>Host / IP</label>
+        <input name="host" placeholder="1.2.3.4" required></div>
+      <div class="form-group"><label>SSH User</label>
+        <input name="ssh_user" value="root"></div>
+      <div class="form-group"><label>SSH Port</label>
+        <input name="ssh_port" type="number" value="22"></div>
+      <div class="form-group"><label>SSH Key (optional)</label>
+        <input name="ssh_key" placeholder="~/.ssh/id_rsa"></div>
+      <div class="form-group">
+        <div class="checkbox-group">
+          <input type="checkbox" name="iperf3" id="add-iperf3" checked>
+          <label for="add-iperf3">Enable iperf3 bandwidth test</label>
+        </div>
+      </div>
+    </div>
+    <br>
+    <button type="submit" class="btn btn-primary">Add Host</button>
+  </form>
+</div>
+
+<!-- ── Settings ──────────────────────────────────────────────────────────── -->
+<div class="section">
+  <h2>Settings</h2>
+  <form method="POST" action="/settings">
+    <div class="form-grid">
+      <div class="form-group"><label>Probe interval (s)</label>
+        <input name="probe_interval" type="number" value="{{ settings.probe_interval }}"></div>
+      <div class="form-group"><label>iperf3 interval (s)</label>
+        <input name="iperf3_interval" type="number" value="{{ settings.iperf3_interval }}"></div>
+      <div class="form-group"><label>Ping count</label>
+        <input name="ping_count" type="number" value="{{ settings.ping_count }}"></div>
+      <div class="form-group"><label>iperf3 duration (s)</label>
+        <input name="iperf3_duration" type="number" value="{{ settings.iperf3_duration }}"></div>
+      <div class="form-group"><label>iperf3 port</label>
+        <input name="iperf3_port" type="number" value="{{ settings.iperf3_port }}"></div>
+    </div>
+    <br>
+    <h3 style="font-size:0.95rem; color:var(--text-dim); margin-bottom:12px;">Thresholds</h3>
+    <div class="form-grid">
+      <div class="form-group"><label>Ping warn (ms)</label>
+        <input name="ping_warn_ms" type="number" value="{{ thresholds.get('ping_warn_ms', 100) }}"></div>
+      <div class="form-group"><label>Ping crit (ms)</label>
+        <input name="ping_crit_ms" type="number" value="{{ thresholds.get('ping_crit_ms', 300) }}"></div>
+      <div class="form-group"><label>Loss warn (%)</label>
+        <input name="loss_warn_pct" type="number" value="{{ thresholds.get('loss_warn_pct', 1) }}"></div>
+      <div class="form-group"><label>Loss crit (%)</label>
+        <input name="loss_crit_pct" type="number" value="{{ thresholds.get('loss_crit_pct', 5) }}"></div>
+      <div class="form-group"><label>TCP warn (ms)</label>
+        <input name="tcp_warn_ms" type="number" value="{{ thresholds.get('tcp_warn_ms', 150) }}"></div>
+      <div class="form-group"><label>TCP crit (ms)</label>
+        <input name="tcp_crit_ms" type="number" value="{{ thresholds.get('tcp_crit_ms', 500) }}"></div>
+      <div class="form-group"><label>BW warn (Mbps)</label>
+        <input name="bw_warn_mbps" type="number" value="{{ thresholds.get('bw_warn_mbps', 50) }}"></div>
+      <div class="form-group"><label>BW crit (Mbps)</label>
+        <input name="bw_crit_mbps" type="number" value="{{ thresholds.get('bw_crit_mbps', 10) }}"></div>
+    </div>
+    <br>
+    <button type="submit" class="btn btn-primary">Save Settings</button>
+  </form>
+</div>
+
+<script>
+// Clock
+function tick() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+}
+tick(); setInterval(tick, 1000);
+
+// Inline edit toggle
+function toggleEdit(idx) {
+  document.getElementById('edit-' + idx).classList.toggle('active');
+}
+
+// Auto-refresh dashboard every 5 s
+function refreshDashboard() {
+  fetch('/api/status')
+    .then(r => r.json())
+    .then(data => {
+      const thr = data.thresholds || {};
+      const tbody = document.getElementById('host-rows');
+      // rebuild rows
+      let html = '';
+      data.hosts.forEach((h, i) => {
+        const name = h.name;
+        const r = data.results[name] || {};
+        const p = r.ping || {};
+        const t = r.tcp || {};
+        const ip = r.iperf3 || {};
+
+        const pw = thr.ping_warn_ms || 100, pc = thr.ping_crit_ms || 300;
+        const lw = thr.loss_warn_pct || 1, lc = thr.loss_crit_pct || 5;
+        const tw = thr.tcp_warn_ms || 150, tc = thr.tcp_crit_ms || 500;
+        const bw = thr.bw_warn_mbps || 50, bc = thr.bw_crit_mbps || 10;
+
+        function cls(v, w, c, low) {
+          if (v == null) return 'val-dim';
+          if (low) return v <= c ? 'val-red' : v <= w ? 'val-yellow' : 'val-green';
+          return v >= c ? 'val-red' : v >= w ? 'val-yellow' : 'val-green';
+        }
+        function fmt(v, suf, dec) {
+          if (v == null) return '—';
+          return v.toFixed(dec !== undefined ? dec : 1) + (suf || '');
+        }
+
+        let icon = '?';
+        if (p.success === false || (p.loss != null && p.loss >= 50))
+          icon = '<span class="val-red">✗</span>';
+        else if (p.success)
+          icon = (p.loss >= 1 || t.success === false)
+            ? '<span class="val-yellow">⚠</span>'
+            : '<span class="val-green">✓</span>';
+
+        const avg = p.success ? p.avg : null;
+        const jitter = p.success ? p.jitter : null;
+        const loss = p.loss != null ? p.loss : null;
+        const rtt = t.success ? t.rtt : null;
+        const dl = ip.success ? ip.download_mbps : null;
+        const ul = ip.success ? ip.upload_mbps : null;
+        const ts = p.ts ? p.ts.slice(-8) : '—';
+
+        html += '<tr>';
+        html += '<td class="val-dim">' + (i+1) + '</td>';
+        html += '<td><strong>' + name + '</strong></td>';
+        html += '<td class="host-col">' + h.host + '</td>';
+        html += '<td class="icon">' + icon + '</td>';
+        html += '<td class="' + cls(avg, pw, pc) + '">' + fmt(avg, ' ms') + '</td>';
+        html += '<td class="' + cls(jitter, pw*0.3, pc*0.3) + '">' + fmt(jitter, ' ms') + '</td>';
+        html += '<td class="' + cls(loss, lw, lc) + '">' + fmt(loss, '%') + '</td>';
+        html += '<td class="' + cls(rtt, tw, tc) + '">' + fmt(rtt, ' ms') + '</td>';
+        html += '<td class="' + cls(dl, bw, bc, true) + '">' + fmt(dl, '', 0) + '</td>';
+        html += '<td class="' + cls(ul, bw, bc, true) + '">' + fmt(ul, '', 0) + '</td>';
+        html += '<td class="spark">——————————</td>';
+        html += '<td class="val-dim">' + ts + '</td>';
+        html += '<td>';
+        html += '<button class="btn-sm btn-edit" onclick="toggleEdit('+i+')">✎</button> ';
+        html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(\'Delete '+name+'?\')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
+        html += '</td></tr>';
+
+        // edit row placeholder (keep existing inline edit form)
+        html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="13">';
+        html += '<form method="POST" action="/hosts/'+i+'/edit" class="edit-form">';
+        html += '<div class="form-group"><label>Name</label><input name="name" value="'+h.name+'" required></div>';
+        html += '<div class="form-group"><label>Host</label><input name="host" value="'+h.host+'" required></div>';
+        html += '<div class="form-group"><label>SSH User</label><input name="ssh_user" value="'+(h.ssh_user||'')+'"></div>';
+        html += '<div class="form-group"><label>SSH Port</label><input name="ssh_port" type="number" value="'+(h.ssh_port||22)+'"></div>';
+        html += '<div class="form-group"><label>SSH Key</label><input name="ssh_key" value="'+(h.ssh_key||'')+'" placeholder="~/.ssh/id_rsa"></div>';
+        html += '<div class="checkbox-group"><input type="checkbox" name="iperf3" '+(h.iperf3?'checked':'')+'> iperf3</div>';
+        html += '<button type="submit" class="btn btn-primary">Save</button>';
+        html += '<button type="button" class="btn btn-secondary" onclick="toggleEdit('+i+')">Cancel</button>';
+        html += '</form></td></tr>';
+      });
+      tbody.innerHTML = html;
+    })
+    .catch(() => {});
+}
+setInterval(refreshDashboard, 5000);
+</script>
+
+</body>
+</html>

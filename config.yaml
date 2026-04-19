@@ -1,0 +1,40 @@
+# ── Intervals ────────────────────────────────────────────────────────────────
+probe_interval:   30    # seconds between ping + TCP probe cycles
+iperf3_interval:  300   # seconds between iperf3 bandwidth cycles (5 min)
+ping_count:       10    # ICMP packets per probe (0.2 s apart → ~2 s total)
+iperf3_duration:  5     # seconds per iperf3 direction (upload then download)
+iperf3_port:      5201  # ephemeral port used during iperf3 tests
+
+# ── Color thresholds ─────────────────────────────────────────────────────────
+thresholds:
+  ping_warn_ms:   100   # yellow if avg ping exceeds this
+  ping_crit_ms:   300   # red   if avg ping exceeds this
+  loss_warn_pct:  1     # yellow if packet loss exceeds this
+  loss_crit_pct:  5     # red   if packet loss exceeds this
+  tcp_warn_ms:    150   # yellow if TCP connect RTT exceeds this
+  tcp_crit_ms:    500   # red   if TCP connect RTT exceeds this
+  bw_warn_mbps:   50    # yellow if bandwidth drops below this
+  bw_crit_mbps:   10    # red   if bandwidth drops below this
+
+# ── VPS targets ───────────────────────────────────────────────────────────────
+# ssh_key is optional; omit to use ssh-agent / ~/.ssh/config
+hosts:
+  - name:     "VPS-1"
+    host:     "1.2.3.4"
+    ssh_user: "root"
+    ssh_port: 22
+    ssh_key:  "~/.ssh/id_rsa"
+    iperf3:   true
+
+  - name:     "VPS-2"
+    host:     "5.6.7.8"
+    ssh_user: "ubuntu"
+    ssh_port: 22
+    ssh_key:  "~/.ssh/id_rsa"
+    iperf3:   true
+
+  # - name:     "VPS-3"
+  #   host:     "9.10.11.12"
+  #   ssh_user: "root"
+  #   ssh_port: 22
+  #   iperf3:   false   # ping + TCP only (no iperf3)
