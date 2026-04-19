@@ -124,19 +124,6 @@ class ProbeEngine:
                             )
             self._stop.wait(timeout=interval)
 
-    def _iperf3_loop(self) -> None:
-        interval = self.cfg.get("iperf3_interval", 300)
-        while not self._stop.is_set():
-            targets = [h for h in self.cfg.get("hosts", []) if h.get("iperf3")]
-            for h in targets:
-                if self._stop.is_set():
-                    break
-                try:
-                    self._probe_iperf3(h)
-                except Exception as exc:
-                    print(f"[iperf3 error] {h['name']}: {exc}", file=sys.stderr)
-            self._stop.wait(timeout=interval)
-
     # ── Start / stop ──────────────────────────────────────────────────────
 
     def start(self) -> None:
@@ -144,10 +131,8 @@ class ProbeEngine:
             return
         self._stop.clear()
         t1 = threading.Thread(target=self._ping_loop, daemon=True, name="ping-loop")
-        t2 = threading.Thread(target=self._iperf3_loop, daemon=True, name="iperf3-loop")
         t1.start()
-        t2.start()
-        self._threads = [t1, t2]
+        self._threads = [t1]
         self._running = True
 
     def stop(self) -> None:

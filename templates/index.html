@@ -135,6 +135,17 @@
   }
   .modal-close:hover { color: var(--text); }
 
+  /* ── Selected row + chart tabs ────────────────────────────── */
+  .data-row { cursor: pointer; }
+  .data-row.selected td { background: rgba(88,166,255,0.1) !important; }
+  .chart-tab {
+    border: 1px solid var(--border); background: transparent;
+    color: var(--text-dim); padding: 5px 14px; border-radius: 4px;
+    cursor: pointer; font-size: 0.85rem; margin-left: 4px;
+  }
+  .chart-tab:hover { background: var(--border); color: var(--text); }
+  .chart-tab.active { background: var(--cyan); color: var(--bg); border-color: var(--cyan); }
+
   /* ── iperf3 trigger button ───────────────────────────── */
   .btn-run { color: var(--green); }
   .btn-run.running { color: var(--yellow); animation: spin 1s linear infinite; }
@@ -146,6 +157,8 @@
     .form-grid { grid-template-columns: 1fr 1fr; }
   }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 </head>
 <body>
 
@@ -183,7 +196,7 @@
 {% set p = r.get('ping', {}) %}
 {% set t = r.get('tcp', {}) %}
 {% set ip = r.get('iperf3', {}) %}
-<tr>
+<tr class="data-row" id="row-{{ loop.index0 }}" onclick="selectHost('{{ name }}', {{ loop.index0 }})">
   <td class="val-dim">{{ loop.index }}</td>
   <td><strong>{{ name }}</strong></td>
   <td class="host-col">{{ h.host }}</td>
@@ -201,10 +214,8 @@
   <td>{{ ('%0.0f' % ip.download_mbps) if ip.get('success') and ip.download_mbps is not none else '—' }}</td>
   <td>{{ ('%0.0f' % ip.upload_mbps) if ip.get('success') and ip.upload_mbps is not none else '—' }}</td>
   <td class="spark">{{ ''.join(history.get(name, [])|map('string')|list)[:10] if history.get(name) else '——————————' }}</td>
-  <td>
-    {% if h.get('iperf3') %}
+  <td onclick="event.stopPropagation()">
     <button class="btn-sm btn-run" id="run-{{ loop.index0 }}" onclick="triggerIperf3({{ loop.index0 }})" title="Run bandwidth test now">⚡</button>
-    {% endif %}
     <button class="btn-sm btn-edit" onclick="toggleEdit({{ loop.index0 }})">✎</button>
     <form method="POST" action="/hosts/{{ loop.index0 }}/delete" style="display:inline"
           onsubmit="return confirm('Delete {{ name }}?')">
@@ -226,10 +237,6 @@
       <input name="ssh_port" type="number" value="{{ h.get('ssh_port', 22) }}"></div>
     <div class="form-group"><label>Password</label>
       <input name="password" type="password" autocomplete="new-password" value="{{ h.get('password', '') }}" placeholder="leave blank for key/agent"></div>
-    <div class="checkbox-group">
-      <input type="checkbox" name="iperf3" id="edit-iperf3-{{ loop.index0 }}" {{ 'checked' if h.get('iperf3') }}>
-      <label for="edit-iperf3-{{ loop.index0 }}">iperf3</label>
-    </div>
     <button type="submit" class="btn btn-primary">Save</button>
     <button type="button" class="btn btn-secondary" onclick="toggleEdit({{ loop.index0 }})">Cancel</button>
   </form>
@@ -239,7 +246,20 @@
 </tbody>
 </table>
 
-<!-- ── Add Host modal ────────────────────────────────────────────────────── -->
+<!-- ── History chart ────────────────────────────────────────────── -->
+<div id="chart-section" style="display:none; margin-bottom:32px">
+  <div class="table-header" style="margin-bottom:8px">
+    <h2>History &mdash; <span id="chart-host-name"></span></h2>
+    <div>
+      <button class="chart-tab active" data-tab="latency"  onclick="switchChartTab('latency')">Latency</button>
+      <button class="chart-tab"        data-tab="bandwidth" onclick="switchChartTab('bandwidth')">Bandwidth</button>
+      <button class="chart-tab"        data-tab="loss"      onclick="switchChartTab('loss')">Loss</button>
+    </div>
+  </div>
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;height:300px">
+    <canvas id="history-chart"></canvas>
+  </div>
+</div> ────────────────────────────────────────────────────── -->
 <div class="modal-overlay" id="modal-add" onclick="closeModalIfBg(event, 'modal-add')">
   <div class="modal">
     <button class="modal-close" onclick="closeModal('modal-add')">✕</button>
@@ -256,12 +276,6 @@
           <input name="ssh_port" type="number" value="22"></div>
         <div class="form-group"><label>Password (optional)</label>
           <input name="password" type="password" autocomplete="new-password" placeholder="leave blank for key/agent"></div>
-        <div class="form-group">
-          <div class="checkbox-group">
-            <input type="checkbox" name="iperf3" id="add-iperf3" checked>
-            <label for="add-iperf3">Enable iperf3 bandwidth test</label>
-          </div>
-        </div>
       </div>
       <br>
       <button type="submit" class="btn btn-primary">Add Host</button>
@@ -279,8 +293,6 @@
       <div class="form-grid">
         <div class="form-group"><label>Probe interval (s)</label>
           <input name="probe_interval" type="number" value="{{ settings.probe_interval }}"></div>
-        <div class="form-group"><label>iperf3 interval (s)</label>
-          <input name="iperf3_interval" type="number" value="{{ settings.iperf3_interval }}"></div>
         <div class="form-group"><label>Ping count</label>
           <input name="ping_count" type="number" value="{{ settings.ping_count }}"></div>
         <div class="form-group"><label>iperf3 duration (s)</label>
@@ -316,18 +328,25 @@
 </div>
 
 <script>
-// Clock
+// ── Chart state ───────────────────────────────────────────────────────────────
+let _chart = null;
+let _selectedHost = null;
+let _selectedIdx  = null;
+let _historyCache = {};
+
+// ── Clock ─────────────────────────────────────────────────────────────────────
 function tick() {
   document.getElementById('clock').textContent = new Date().toLocaleTimeString();
 }
 tick(); setInterval(tick, 1000);
 
-// Inline edit toggle
+// ── Inline edit toggle ────────────────────────────────────────────────────────
 function toggleEdit(idx) {
+  event.stopPropagation();
   document.getElementById('edit-' + idx).classList.toggle('active');
 }
 
-// Modal helpers
+// ── Modal helpers ─────────────────────────────────────────────────────────────
 function openModal(id)  { document.getElementById(id).classList.add('active'); }
 function closeModal(id) { document.getElementById(id).classList.remove('active'); }
 function closeModalIfBg(e, id) { if (e.target === e.currentTarget) closeModal(id); }
@@ -336,7 +355,7 @@ document.addEventListener('keydown', e => {
     document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
 });
 
-// Force iperf3 bandwidth test
+// ── iperf3 manual trigger ─────────────────────────────────────────────────────
 function triggerIperf3(idx) {
   const btn = document.getElementById('run-' + idx);
   if (!btn || btn.classList.contains('running')) return;
@@ -345,35 +364,121 @@ function triggerIperf3(idx) {
   fetch('/hosts/' + idx + '/trigger-iperf3', { method: 'POST' })
     .then(r => r.json())
     .then(() => { setTimeout(() => { btn.classList.remove('running'); btn.disabled = false; }, 3000); })
-    .catch(() => { btn.classList.remove('running'); btn.disabled = false; });
+    .catch(()  => { btn.classList.remove('running'); btn.disabled = false; });
 }
 
-// Auto-refresh dashboard every 5 s
+// ── History chart ─────────────────────────────────────────────────────────────
+function selectHost(name, idx) {
+  _selectedHost = name;
+  _selectedIdx  = idx;
+  document.querySelectorAll('#host-rows tr.data-row').forEach(r => r.classList.remove('selected'));
+  const row = document.getElementById('row-' + idx);
+  if (row) row.classList.add('selected');
+  document.getElementById('chart-host-name').textContent = name;
+  document.getElementById('chart-section').style.display = 'block';
+  fetchHistory(name);
+}
+
+function fetchHistory(name) {
+  fetch('/api/history/' + encodeURIComponent(name))
+    .then(r => r.json())
+    .then(data => {
+      _historyCache[name] = data;
+      renderChart(name, document.querySelector('.chart-tab.active')?.dataset.tab || 'latency');
+    })
+    .catch(() => {});
+}
+
+function switchChartTab(tab) {
+  document.querySelectorAll('.chart-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  if (_selectedHost && _historyCache[_selectedHost]) renderChart(_selectedHost, tab);
+}
+
+function renderChart(name, tab) {
+  const data = _historyCache[name];
+  if (!data) return;
+  const CH = { bg: '#0d1117', surface: '#161b22', border: '#30363d',
+                text: '#c9d1d9', dim: '#8b949e', green: '#3fb950',
+                yellow: '#d29922', red: '#f85149', cyan: '#58a6ff' };
+  let datasets = [], yScales = {};
+
+  // TS from DB is naive UTC — append Z so Date parses correctly
+  const ts = rows => rows.map(r => r.ts.endsWith('Z') ? r.ts : r.ts + 'Z');
+
+  if (tab === 'latency') {
+    const ping = [...data.ping].reverse();
+    const tcp  = [...data.tcp].reverse();
+    datasets = [
+      { label: 'Ping avg (ms)', data: ping.map((r,i) => ({x: ts(ping)[i], y: r.success ? r.avg    : null})), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)',   tension: 0.3, spanGaps: true, yAxisID: 'y' },
+      { label: 'Jitter (ms)',   data: ping.map((r,i) => ({x: ts(ping)[i], y: r.success ? r.jitter : null})), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)',  tension: 0.3, spanGaps: true, yAxisID: 'y' },
+      { label: 'TCP RTT (ms)', data: tcp.map((r,i)  => ({x: ts(tcp)[i],  y: r.success ? r.rtt    : null})), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)',  tension: 0.3, spanGaps: true, yAxisID: 'y' },
+    ];
+    yScales = { y: { title: { display: true, text: 'ms', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
+
+  } else if (tab === 'bandwidth') {
+    const rows = [...data.iperf3].reverse();
+    if (!rows.length) { document.getElementById('history-chart').getContext('2d').clearRect(0,0,9999,9999); return; }
+    datasets = [
+      { label: '↓ Download (Mbps)', data: rows.map((r,i) => ({x: ts(rows)[i], y: r.success ? r.download_mbps : null})), borderColor: CH.green, backgroundColor: 'rgba(63,185,80,0.08)',  tension: 0.3, spanGaps: true, yAxisID: 'y' },
+      { label: '↑ Upload (Mbps)',   data: rows.map((r,i) => ({x: ts(rows)[i], y: r.success ? r.upload_mbps   : null})), borderColor: CH.cyan,  backgroundColor: 'rgba(88,166,255,0.08)', tension: 0.3, spanGaps: true, yAxisID: 'y' },
+    ];
+    yScales = { y: { title: { display: true, text: 'Mbps', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
+
+  } else if (tab === 'loss') {
+    const rows = [...data.ping].reverse();
+    datasets = [
+      { label: 'Loss (%)', data: rows.map((r,i) => ({x: ts(rows)[i], y: r.loss ?? null})), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true, tension: 0.3, spanGaps: true, yAxisID: 'y' },
+    ];
+    yScales = { y: { min: 0, title: { display: true, text: '%', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
+  }
+
+  const ctx = document.getElementById('history-chart').getContext('2d');
+  if (_chart) { _chart.destroy(); _chart = null; }
+  _chart = new Chart(ctx, {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: CH.text, boxWidth: 12, padding: 16 } },
+        tooltip: { backgroundColor: CH.surface, borderColor: CH.border, borderWidth: 1, titleColor: CH.text, bodyColor: CH.dim },
+      },
+      scales: {
+        x: {
+          type: 'time',
+          time: { tooltipFormat: 'MMM d HH:mm:ss', displayFormats: { second: 'HH:mm:ss', minute: 'HH:mm', hour: 'MMM d HH:mm' } },
+          ticks: { color: CH.dim, maxTicksLimit: 10 }, grid: { color: CH.border },
+        },
+        ...yScales,
+      },
+    },
+  });
+}
+
+// ── Auto-refresh dashboard every 5 s ─────────────────────────────────────────
 function refreshDashboard() {
   const tbody = document.getElementById('host-rows');
-  // Don't disrupt the user while they're typing in the table
   if (tbody.contains(document.activeElement)) return;
 
   fetch('/api/status')
     .then(r => r.json())
     .then(data => {
       const thr = data.thresholds || {};
-      // Save the entire DOM nodes of any open edit rows (preserves user's typed values)
       const savedEditRows = new Map();
       tbody.querySelectorAll('.edit-row.active').forEach(el => savedEditRows.set(el.id, el.cloneNode(true)));
-      // rebuild rows
       let html = '';
       data.hosts.forEach((h, i) => {
         const name = h.name;
-        const r = data.results[name] || {};
-        const p = r.ping || {};
-        const t = r.tcp || {};
+        const r  = data.results[name] || {};
+        const p  = r.ping   || {};
+        const t  = r.tcp    || {};
         const ip = r.iperf3 || {};
 
         const pw = thr.ping_warn_ms || 100, pc = thr.ping_crit_ms || 300;
-        const lw = thr.loss_warn_pct || 1, lc = thr.loss_crit_pct || 5;
-        const tw = thr.tcp_warn_ms || 150, tc = thr.tcp_crit_ms || 500;
-        const bw = thr.bw_warn_mbps || 50, bc = thr.bw_crit_mbps || 10;
+        const lw = thr.loss_warn_pct || 1,  lc = thr.loss_crit_pct || 5;
+        const tw = thr.tcp_warn_ms  || 150, tc = thr.tcp_crit_ms   || 500;
+        const bw = thr.bw_warn_mbps || 50,  bc = thr.bw_crit_mbps  || 10;
 
         function cls(v, w, c, low) {
           if (v == null) return 'val-dim';
@@ -393,32 +498,34 @@ function refreshDashboard() {
             ? '<span class="val-yellow">⚠</span>'
             : '<span class="val-green">✓</span>';
 
-        const avg = p.success ? p.avg : null;
-        const jitter = p.success ? p.jitter : null;
-        const loss = p.loss != null ? p.loss : null;
-        const rtt = t.success ? t.rtt : null;
-        const dl = ip.success ? ip.download_mbps : null;
-        const ul = ip.success ? ip.upload_mbps : null;
+        const avg    = p.success     ? p.avg          : null;
+        const jitter = p.success     ? p.jitter        : null;
+        const loss   = p.loss != null ? p.loss         : null;
+        const rtt    = t.success     ? t.rtt           : null;
+        const dl     = ip.success    ? ip.download_mbps : null;
+        const ul     = ip.success    ? ip.upload_mbps   : null;
 
-        html += '<tr>';
+        const safeName = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        const sel = (_selectedHost === name) ? ' selected' : '';
+
+        html += '<tr class="data-row' + sel + '" id="row-' + i + '" onclick="selectHost(\'' + safeName + '\',' + i + ')">';
         html += '<td class="val-dim">' + (i+1) + '</td>';
         html += '<td><strong>' + name + '</strong></td>';
         html += '<td class="host-col">' + h.host + '</td>';
         html += '<td class="icon">' + icon + '</td>';
-        html += '<td class="' + cls(avg, pw, pc) + '">' + fmt(avg, ' ms') + '</td>';
-        html += '<td class="' + cls(jitter, pw*0.3, pc*0.3) + '">' + fmt(jitter, ' ms') + '</td>';
-        html += '<td class="' + cls(loss, lw, lc) + '">' + fmt(loss, '%') + '</td>';
-        html += '<td class="' + cls(rtt, tw, tc) + '">' + fmt(rtt, ' ms') + '</td>';
-        html += '<td class="' + cls(dl, bw, bc, true) + '">' + fmt(dl, '', 0) + '</td>';
-        html += '<td class="' + cls(ul, bw, bc, true) + '">' + fmt(ul, '', 0) + '</td>';
+        html += '<td class="' + cls(avg, pw, pc) + '">'           + fmt(avg, ' ms')  + '</td>';
+        html += '<td class="' + cls(jitter, pw*0.3, pc*0.3) + '">'+ fmt(jitter,' ms')+ '</td>';
+        html += '<td class="' + cls(loss, lw, lc) + '">'          + fmt(loss, '%')   + '</td>';
+        html += '<td class="' + cls(rtt, tw, tc) + '">'           + fmt(rtt, ' ms')  + '</td>';
+        html += '<td class="' + cls(dl, bw, bc, true) + '">'      + fmt(dl, '', 0)   + '</td>';
+        html += '<td class="' + cls(ul, bw, bc, true) + '">'      + fmt(ul, '', 0)   + '</td>';
         html += '<td class="spark">——————————</td>';
-        html += '<td>';
-        if (h.iperf3) html += '<button class="btn-sm btn-run" id="run-'+i+'" onclick="triggerIperf3('+i+')" title="Run bandwidth test now">⚡</button> ';
+        html += '<td onclick="event.stopPropagation()">';
+        html += '<button class="btn-sm btn-run" id="run-'+i+'" onclick="triggerIperf3('+i+')" title="Run bandwidth test now">⚡</button> ';
         html += '<button class="btn-sm btn-edit" onclick="toggleEdit('+i+')">✎</button> ';
-        html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(\'Delete '+name+'?\')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
+        html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(\'Delete '+safeName+'?\')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
         html += '</td></tr>';
 
-        // edit row placeholder
         html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="12">';
         html += '<form method="POST" action="/hosts/'+i+'/edit" class="edit-form">';
         html += '<div class="form-group"><label>Name</label><input name="name" value="'+h.name+'" required></div>';
@@ -426,17 +533,25 @@ function refreshDashboard() {
         html += '<div class="form-group"><label>SSH User</label><input name="ssh_user" value="'+(h.ssh_user||'')+'"></div>';
         html += '<div class="form-group"><label>SSH Port</label><input name="ssh_port" type="number" value="'+(h.ssh_port||22)+'"></div>';
         html += '<div class="form-group"><label>Password</label><input name="password" type="password" autocomplete="new-password" value="" placeholder="leave blank for key/agent"></div>';
-        html += '<div class="checkbox-group"><input type="checkbox" name="iperf3" '+(h.iperf3?'checked':'')+'> iperf3</div>';
         html += '<button type="submit" class="btn btn-primary">Save</button>';
         html += '<button type="button" class="btn btn-secondary" onclick="toggleEdit('+i+')">Cancel</button>';
         html += '</form></td></tr>';
       });
       tbody.innerHTML = html;
-      // Restore saved edit row nodes (with user's in-progress input intact)
       savedEditRows.forEach((savedEl, id) => {
         const newEl = document.getElementById(id);
         if (newEl) newEl.parentNode.replaceChild(savedEl, newEl);
       });
+      // Silently refresh history chart if a host is selected
+      if (_selectedHost) {
+        fetch('/api/history/' + encodeURIComponent(_selectedHost))
+          .then(r => r.json())
+          .then(d => {
+            _historyCache[_selectedHost] = d;
+            if (_chart) renderChart(_selectedHost, document.querySelector('.chart-tab.active')?.dataset.tab || 'latency');
+          })
+          .catch(() => {});
+      }
     })
     .catch(() => {});
 }

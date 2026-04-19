@@ -19,6 +19,7 @@ import threading
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 from engine import ProbeEngine, load_config, save_config
+import storage
 
 app = Flask(__name__)
 
@@ -45,7 +46,6 @@ def index():
         history=snap_h,
         settings={
             "probe_interval": cfg.get("probe_interval", 30),
-            "iperf3_interval": cfg.get("iperf3_interval", 300),
             "ping_count": cfg.get("ping_count", 10),
             "iperf3_duration": cfg.get("iperf3_duration", 5),
             "iperf3_port": cfg.get("iperf3_port", 5201),
@@ -79,7 +79,6 @@ def add_host():
         "host":     request.form["host"].strip(),
         "ssh_user": request.form["ssh_user"].strip(),
         "ssh_port": int(request.form.get("ssh_port") or 22),
-        "iperf3":   "iperf3" in request.form,
     }
     password = request.form.get("password", "").strip()
     if password:
@@ -103,7 +102,6 @@ def edit_host(idx: int):
             "host":     request.form["host"].strip(),
             "ssh_user": request.form["ssh_user"].strip(),
             "ssh_port": int(request.form.get("ssh_port") or 22),
-            "iperf3":   "iperf3" in request.form,
         }
         password = request.form.get("password", "").strip()
         if password:
@@ -133,12 +131,22 @@ def trigger_iperf3(idx: int):
     if not (0 <= idx < len(hosts)):
         return jsonify(ok=False, error="host not found"), 404
     h = hosts[idx]
-    if not h.get("iperf3"):
-        return jsonify(ok=False, error="iperf3 disabled for this host"), 400
     threading.Thread(
         target=engine._probe_iperf3, args=(h,), daemon=True, name=f"iperf3-manual-{idx}"
     ).start()
     return jsonify(ok=True)
+
+
+# ── History API ───────────────────────────────────────────────────
+
+@app.route("/api/history/<host>")
+def api_history(host: str):
+    limit = request.args.get("limit", 300, type=int)
+    return jsonify(
+        ping=storage.recent(host, "ping", limit=limit),
+        tcp=storage.recent(host, "tcp", limit=limit),
+        iperf3=storage.recent(host, "iperf3", limit=limit),
+    )
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────
@@ -146,8 +154,7 @@ def trigger_iperf3(idx: int):
 @app.route("/settings", methods=["POST"])
 def update_settings():
     cfg = _cfg()
-    for key in ("probe_interval", "iperf3_interval", "ping_count",
-                "iperf3_duration", "iperf3_port"):
+    for key in ("probe_interval", "ping_count", "iperf3_duration", "iperf3_port"):
         val = request.form.get(key)
         if val is not None:
             cfg[key] = int(val)
