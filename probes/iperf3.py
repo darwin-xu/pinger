@@ -53,15 +53,18 @@ def _exec(
     client: paramiko.SSHClient,
     cmd: str,
     timeout: int = 30,
-) -> tuple[int, str, str]:
-    """Run *cmd* on an open SSH client; return (rc, stdout, stderr)."""
-    _, stdout, stderr = client.exec_command(cmd, timeout=timeout)
+) -> tuple[int, str]:
+    """Run *cmd* on the SSH client; return (rc, combined_output).
+
+    stderr is merged into stdout at the shell level so that:
+    * All output (error messages, progress) is captured in one string.
+    * There is no pipe-buffer deadlock — we drain a single stream before
+      calling recv_exit_status(), so the remote process can always write.
+    """
+    _, stdout, _ = client.exec_command(f"( {cmd} ) 2>&1", timeout=timeout)
+    out = stdout.read().decode(errors="replace").strip()
     rc = stdout.channel.recv_exit_status()
-    return (
-        rc,
-        stdout.read().decode(errors="replace"),
-        stderr.read().decode(errors="replace"),
-    )
+    return rc, out
 
 
 def _run_client(
@@ -69,20 +72,59 @@ def _run_client(
     port: int,
     duration: int,
     reverse: bool = False,
-) -> float | None:
-    """Run local iperf3 client; return measured Mbps or None on failure."""
+) -> tuple[float | None, str | None]:
+    """Run local iperf3 client; return (Mbps, error_string).
+
+    On success: (float, None).
+    On failure: (None, human-readable reason).
+    iperf3 -J outputs a JSON {"error": "..."} on failure, so we parse that
+    to get the real reason (e.g. "Connection timed out", "Connection refused").
+    """
     cmd = ["iperf3", "-c", host, "-p", str(port), "-t", str(duration), "-J"]
     if reverse:
         cmd.append("-R")
+    direction = "download" if reverse else "upload"
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 25)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 30)
+        # iperf3 always emits JSON with -J, even on error
+        try:
+            data = json.loads(r.stdout)
+        except (json.JSONDecodeError, ValueError):
+            # No JSON at all — binary probably not found or crashed immediately
+            msg = r.stderr.strip() or r.stdout.strip() or "iperf3 produced no output"
+            return None, f"{direction}: {msg}"
         if r.returncode != 0:
-            return None
-        data = json.loads(r.stdout)
+            err = data.get("error") or r.stderr.strip() or "unknown error"
+            return None, f"{direction}: {err}"
         bps_key = "sum_received" if reverse else "sum_sent"
-        return data["end"][bps_key]["bits_per_second"] / 1e6
-    except Exception:
-        return None
+        return data["end"][bps_key]["bits_per_second"] / 1e6, None
+    except subprocess.TimeoutExpired:
+        return None, f"{direction}: timed out after {duration + 30}s (firewall?)"
+    except FileNotFoundError:
+        return None, "iperf3 binary not found locally — install with: brew install iperf3"
+    except Exception as exc:
+        return None, f"{direction}: {exc}"
+
+
+def _install_iperf3(client: paramiko.SSHClient) -> tuple[int, str]:
+    """Try to install iperf3 using whatever package manager is available.
+
+    Returns (rc, combined_output) — rc==0 means success.
+    Tries apt-get, then dnf, then yum, then apk.
+    """
+    # Detect package manager
+    for pm, install_cmd in [
+        ("apt-get",
+         "DEBIAN_FRONTEND=noninteractive apt-get update -qq && "
+         "DEBIAN_FRONTEND=noninteractive apt-get install -y -q iperf3"),
+        ("dnf",  "dnf install -y -q iperf3"),
+        ("yum",  "yum install -y -q iperf3"),
+        ("apk",  "apk add --no-cache iperf3"),
+    ]:
+        rc_which, _ = _exec(client, f"command -v {pm}", timeout=10)
+        if rc_which == 0:
+            return _exec(client, f"sudo {install_cmd}", timeout=180)
+    return 1, "no supported package manager found (tried apt-get, dnf, yum, apk)"
 
 
 def probe(host_config: dict, duration: int = 5, iperf3_port: int = 5201) -> dict:
@@ -105,38 +147,34 @@ def probe(host_config: dict, duration: int = 5, iperf3_port: int = 5201) -> dict
 
     try:
         # 1. Ensure iperf3 is installed on the remote
-        rc, _, _ = _exec(client, "command -v iperf3", timeout=10)
+        rc, _ = _exec(client, "command -v iperf3", timeout=10)
         if rc != 0:
-            rc, _, err = _exec(
-                client,
-                "sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && "
-                "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q iperf3",
-                timeout=120,
-            )
+            rc, out = _install_iperf3(client)
             if rc != 0:
-                return {"success": False, "error": f"auto-install failed: {err.strip()}"}
+                return {"success": False, "error": f"auto-install failed: {out or '(no output)'}"}
 
         # 2. Kill any stale server process
         _exec(client, "pkill -f 'iperf3 -s' 2>/dev/null || true")
         time.sleep(0.4)
 
         # 3. Start iperf3 server in background
-        rc, _, err = _exec(
+        rc, out = _exec(
             client,
             f"nohup iperf3 -s -p {iperf3_port} >/dev/null 2>&1 & echo ok",
         )
         if rc != 0:
-            return {"success": False, "error": f"failed to start iperf3 server: {err.strip()}"}
+            return {"success": False, "error": f"failed to start iperf3 server: {out}"}
         time.sleep(1.5)
 
         # 4 & 5. Run local iperf3 client (upload then download)
-        upload_mbps   = _run_client(host, iperf3_port, duration, reverse=False)
-        download_mbps = _run_client(host, iperf3_port, duration, reverse=True)
+        upload_mbps,   ul_err = _run_client(host, iperf3_port, duration, reverse=False)
+        download_mbps, dl_err = _run_client(host, iperf3_port, duration, reverse=True)
 
         if upload_mbps is None and download_mbps is None:
+            errors = "; ".join(filter(None, [ul_err, dl_err]))
             return {
                 "success": False,
-                "error": "iperf3 client failed — is iperf3 installed locally?",
+                "error": errors or "iperf3 client failed",
             }
 
         return {

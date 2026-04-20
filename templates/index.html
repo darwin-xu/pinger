@@ -162,10 +162,34 @@
   .chart-tab:hover { background: var(--border); color: var(--text); }
   .chart-tab.active { background: var(--cyan); color: var(--bg); border-color: var(--cyan); }
 
+  /* ── Zoom controls ────────────────────────────────────── */
+  .zoom-controls { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px; }
+  .zoom-range-label { font-size:0.78rem; color:var(--text-dim); font-variant-numeric:tabular-nums; min-width:200px; }
+  .zoom-btns { display:flex; gap:3px; align-items:center; }
+  .zoom-nav-btn {
+    border:1px solid var(--border); background:var(--surface); color:var(--text-dim);
+    cursor:pointer; font-size:0.85rem; padding:2px 9px; border-radius:4px; line-height:1.6;
+  }
+  .zoom-nav-btn:hover { background:var(--border); color:var(--text); }
+  .zoom-level-btn {
+    border:1px solid var(--border); background:transparent; color:var(--text-dim);
+    cursor:pointer; font-size:0.75rem; padding:3px 7px; border-radius:4px;
+  }
+  .zoom-level-btn:hover { background:var(--border); }
+  .zoom-level-btn.active { background:var(--cyan); color:var(--bg); border-color:var(--cyan); }
+  .zoom-sep { display:inline-block; width:6px; }
+  .zoom-live-btn {
+    border:1px solid var(--border); background:transparent; color:var(--green);
+    cursor:pointer; font-size:0.75rem; padding:3px 8px; border-radius:4px; margin-left:4px;
+  }
+  .zoom-live-btn.paused { color:var(--text-dim); }
+  .zoom-live-btn:hover { background:var(--border); }
+
   /* ── iperf3 trigger button ───────────────────────────── */
   .btn-run { color: var(--green); }
   .btn-run.running { color: var(--yellow); animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .err-tip { cursor: help; }
 
   /* ── Responsive ─────────────────────────────────────── */
   @media (max-width: 900px) {
@@ -227,7 +251,7 @@
   <td>{{ ('%0.1f ms' % p.jitter) if p.get('success') and p.jitter is not none else '—' }}</td>
   <td>{{ ('%0.1f%%' % p.loss) if p.loss is defined and p.loss is not none else '—' }}</td>
   <td>{{ ('%0.1f ms' % t.rtt) if t.get('success') and t.rtt is not none else '—' }}</td>
-  <td>{{ ('%0.0f' % ip.download_mbps) if ip.get('success') and ip.download_mbps is not none else '—' }}</td>
+  <td>{% if ip.get('success') and ip.download_mbps is not none %}{{ '%0.0f' % ip.download_mbps }}{% elif ip.get('success') == false and ip.get('error') %}<span class="val-yellow err-tip" title="{{ ip.get('error')|e }}">⚠</span>{% else %}—{% endif %}</td>
   <td>{{ ('%0.0f' % ip.upload_mbps) if ip.get('success') and ip.upload_mbps is not none else '—' }}</td>
   <td onclick="event.stopPropagation()">
     <button class="btn-sm btn-run" id="run-{{ loop.index0 }}" onclick="triggerIperf3({{ loop.index0 }})" title="Run bandwidth test now">⚡</button>
@@ -263,12 +287,30 @@
 
 <!-- ── History chart ────────────────────────────────────────────── -->
 <div id="chart-section" style="display:none; margin-bottom:32px">
-  <div class="table-header" style="margin-bottom:8px">
+  <div class="table-header" style="margin-bottom:6px">
     <h2>History &mdash; <span id="chart-host-name"></span></h2>
     <div>
       <button class="chart-tab active" data-tab="latency"  onclick="switchChartTab('latency')">Latency</button>
       <button class="chart-tab"        data-tab="bandwidth" onclick="switchChartTab('bandwidth')">Bandwidth</button>
       <button class="chart-tab"        data-tab="loss"      onclick="switchChartTab('loss')">Loss</button>
+    </div>
+  </div>
+  <div class="zoom-controls">
+    <span id="chart-range-label" class="zoom-range-label"></span>
+    <div class="zoom-btns">
+      <button class="zoom-nav-btn" onclick="panLeft()"  title="Pan left">&#9664;</button>
+      <button class="zoom-nav-btn" onclick="zoomOut()"  title="Zoom out">&#8722;</button>
+      <span class="zoom-sep"></span>
+      <button class="zoom-level-btn" id="zlbtn-0" onclick="setZoomLevel(0)">10m</button>
+      <button class="zoom-level-btn" id="zlbtn-1" onclick="setZoomLevel(1)">1h</button>
+      <button class="zoom-level-btn" id="zlbtn-2" onclick="setZoomLevel(2)">12h</button>
+      <button class="zoom-level-btn" id="zlbtn-3" onclick="setZoomLevel(3)">1d</button>
+      <button class="zoom-level-btn" id="zlbtn-4" onclick="setZoomLevel(4)">7d</button>
+      <button class="zoom-level-btn" id="zlbtn-5" onclick="setZoomLevel(5)">1mo</button>
+      <span class="zoom-sep"></span>
+      <button class="zoom-nav-btn" onclick="zoomIn()"   title="Zoom in">&#43;</button>
+      <button class="zoom-nav-btn" onclick="panRight()" title="Pan right">&#9654;</button>
+      <button class="zoom-live-btn" id="btn-live" onclick="setLive()">&#9679; live</button>
     </div>
   </div>
   <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;height:300px">
@@ -343,12 +385,57 @@
 
 <script>
 // ── Chart state ───────────────────────────────────────────────────────────────
-let _chart = null;
+const ZOOM_LEVELS = [
+  // label = tick interval; window = 10 ticks × tickMs
+  { label: '10m', tickMs:        600_000, windowMs:        6_000_000, tickUnit: 'minute', stepSize: 10 },
+  { label: '1h',  tickMs:      3_600_000, windowMs:       36_000_000, tickUnit: 'hour',   stepSize: 1  },
+  { label: '12h', tickMs:     43_200_000, windowMs:      432_000_000, tickUnit: 'hour',   stepSize: 12 },
+  { label: '1d',  tickMs:     86_400_000, windowMs:      864_000_000, tickUnit: 'day',    stepSize: 1  },
+  { label: '7d',  tickMs:    604_800_000, windowMs:    6_048_000_000, tickUnit: 'day',    stepSize: 7  },
+  { label: '1mo', tickMs:  2_592_000_000, windowMs:   25_920_000_000, tickUnit: 'month',  stepSize: 1  },
+];
+let _chart     = null;
 let _chartHost = null;
 let _chartTab  = null;
+let _zoomIdx   = 1;      // default: 1 h
+let _windowEnd = null;   // null = live (right edge = now)
 let _selectedHost = null;
 let _selectedIdx  = null;
-let _historyCache = {};
+
+function escAttr(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Round a timestamp DOWN to the nearest tick boundary (local time)
+function tickFloor(ms, zl) {
+  const d = new Date(ms);
+  switch (zl.tickUnit) {
+    case 'minute':
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate(),
+                      d.getHours(),
+                      Math.floor(d.getMinutes() / zl.stepSize) * zl.stepSize).getTime();
+    case 'hour':
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate(),
+                      Math.floor(d.getHours() / zl.stepSize) * zl.stepSize).getTime();
+    case 'day':
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    case 'month':
+      return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+    default:
+      return ms;
+  }
+}
+
+// Round a timestamp UP to the next tick boundary (local time)
+function tickCeil(ms, zl) {
+  const f = tickFloor(ms, zl);
+  if (f >= ms) return f;  // already on a boundary
+  if (zl.tickUnit === 'month') {
+    const d = new Date(f);
+    return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
+  }
+  return f + zl.tickMs;
+}
 
 // ── Clock ─────────────────────────────────────────────────────────────────────
 function tick() {
@@ -384,6 +471,34 @@ function triggerIperf3(idx) {
 }
 
 // ── History chart ─────────────────────────────────────────────────────────────
+function _ts(r) { return r.ts.endsWith('Z') ? r.ts : r.ts + 'Z'; }
+
+function aggregateSeries(rows, winStart, winEnd, buckets) {
+  const bucketMs = (winEnd - winStart) / buckets;
+  const agg = Array.from({ length: buckets }, (_, i) => ({
+    t: winStart + (i + 0.5) * bucketMs, sums: {}, count: 0,
+  }));
+  const FIELDS = ['avg','min','max','jitter','loss','p95','rtt','download_mbps','upload_mbps'];
+  for (const row of rows) {
+    const t = new Date(_ts(row)).getTime();
+    if (t < winStart || t > winEnd) continue;
+    const bi = Math.min(Math.floor((t - winStart) / bucketMs), buckets - 1);
+    for (const f of FIELDS) {
+      if (row[f] != null) agg[bi].sums[f] = (agg[bi].sums[f] || 0) + row[f];
+    }
+    agg[bi].count++;
+  }
+  return agg.filter(b => b.count > 0).map(b => {
+    const r = { ts: new Date(b.t).toISOString(), success: true };
+    for (const [f, s] of Object.entries(b.sums)) r[f] = s / b.count;
+    return r;
+  });
+}
+
+function currentTab() {
+  return document.querySelector('.chart-tab.active')?.dataset.tab || 'latency';
+}
+
 function selectHost(name, idx) {
   _selectedHost = name;
   _selectedIdx  = idx;
@@ -392,69 +507,119 @@ function selectHost(name, idx) {
   if (row) row.classList.add('selected');
   document.getElementById('chart-host-name').textContent = name;
   document.getElementById('chart-section').style.display = 'block';
-  fetchHistory(name);
-}
-
-function fetchHistory(name) {
-  fetch('/api/history/' + encodeURIComponent(name))
-    .then(r => r.json())
-    .then(data => {
-      _historyCache[name] = data;
-      renderChart(name, document.querySelector('.chart-tab.active')?.dataset.tab || 'latency');
-    })
-    .catch(() => {});
+  fetchAndRender(name, currentTab());
 }
 
 function switchChartTab(tab) {
   document.querySelectorAll('.chart-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  if (_selectedHost && _historyCache[_selectedHost]) renderChart(_selectedHost, tab);
+  if (_selectedHost) fetchAndRender(_selectedHost, tab);
 }
 
-function renderChart(name, tab) {
-  const data = _historyCache[name];
-  if (!data) return;
+function zoomIn()  { if (_zoomIdx > 0)                    { _zoomIdx--; _applyZoom(); } }
+function zoomOut() { if (_zoomIdx < ZOOM_LEVELS.length-1) { _zoomIdx++; _applyZoom(); } }
+function setZoomLevel(i) { _zoomIdx = i; _applyZoom(); }
+function setLive()   { _windowEnd = null; _applyZoom(); }
+function panLeft()   { _windowEnd = (_windowEnd || Date.now()) - ZOOM_LEVELS[_zoomIdx].windowMs; _applyZoom(); }
+function panRight()  {
+  const end = (_windowEnd || Date.now()) + ZOOM_LEVELS[_zoomIdx].windowMs;
+  _windowEnd = end >= Date.now() - 5000 ? null : end;
+  _applyZoom();
+}
+function _applyZoom() { if (_selectedHost) fetchAndRender(_selectedHost, currentTab()); }
+
+function fetchAndRender(name, tab) {
+  const zl     = ZOOM_LEVELS[_zoomIdx];
+  // Align winEnd UP to the next tick boundary so window = exactly 10 ticks
+  const winEnd = tickCeil(_windowEnd || Date.now(), zl);
+  const winStart = zl.tickUnit === 'month'
+    ? (() => { const d = new Date(winEnd); return new Date(d.getFullYear(), d.getMonth() - 10, 1).getTime(); })()
+    : winEnd - zl.windowMs;
+  // Request rows covering the window; cap at 50k to protect the server
+  const limit    = Math.min(Math.ceil(zl.windowMs / 4000) + 200, 50000);
+  const since    = new Date(winStart).toISOString().slice(0, 19); // naive UTC prefix
+  fetch('/api/history/' + encodeURIComponent(name) +
+        '?since=' + encodeURIComponent(since) + '&limit=' + limit)
+    .then(r => r.json())
+    .then(data => { renderChart(name, tab, data, winStart, winEnd); updateZoomControls(winStart, winEnd); })
+    .catch(() => {});
+}
+
+function updateZoomControls(winStart, winEnd) {
+  document.querySelectorAll('.zoom-level-btn').forEach((b, i) =>
+    b.classList.toggle('active', i === _zoomIdx));
+  const liveBtn = document.getElementById('btn-live');
+  if (liveBtn) liveBtn.classList.toggle('paused', _windowEnd !== null);
+  const zl = ZOOM_LEVELS[_zoomIdx];
+  const fmtDate = ms => {
+    const d = new Date(ms);
+    const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    if (zl.windowMs >= 86_400_000) return date + ' ' + d.getFullYear();
+    return date + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+  };
+  const el = document.getElementById('chart-range-label');
+  if (el) el.textContent = fmtDate(winStart) + ' \u2013 ' + fmtDate(winEnd);
+}
+
+function renderChart(name, tab, data, winStart, winEnd) {
   const CH = { bg: '#0d1117', surface: '#161b22', border: '#30363d',
                 text: '#c9d1d9', dim: '#8b949e', green: '#3fb950',
                 yellow: '#d29922', red: '#f85149', cyan: '#58a6ff' };
+  const zl = ZOOM_LEVELS[_zoomIdx];
+
+  // Aggregate when density > 150 points (≈ zoomed out beyond 12–13 min at 5 s interval)
+  const aggregated = data.ping.length > 150;
+
+  function prepRows(raw) {
+    const asc = [...raw].reverse().filter(r => {
+      const t = new Date(_ts(r)).getTime();
+      return t >= winStart && t <= winEnd;
+    });
+    return aggregated ? aggregateSeries(asc, winStart, winEnd, 100) : asc;
+  }
+
   let datasets = [], yScales = {};
 
-  // TS from DB is naive UTC — append Z so Date parses correctly
-  const ts = rows => rows.map(r => r.ts.endsWith('Z') ? r.ts : r.ts + 'Z');
-
   if (tab === 'latency') {
-    const ping = [...data.ping].reverse();
-    const tcp  = [...data.tcp].reverse();
+    const ping = prepRows(data.ping);
+    const tcp  = prepRows(data.tcp);
     datasets = [
-      { label: 'Ping avg (ms)', data: ping.map((r,i) => ({x: ts(ping)[i], y: r.success ? r.avg    : null})), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)',   tension: 0.3, spanGaps: true, yAxisID: 'y' },
-      { label: 'Jitter (ms)',   data: ping.map((r,i) => ({x: ts(ping)[i], y: r.success ? r.jitter : null})), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)',  tension: 0.3, spanGaps: true, yAxisID: 'y' },
-      { label: 'TCP RTT (ms)', data: tcp.map((r,i)  => ({x: ts(tcp)[i],  y: r.success ? r.rtt    : null})), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)',  tension: 0.3, spanGaps: true, yAxisID: 'y' },
+      { label: 'Ping avg (ms)', data: ping.map(r => ({ x: _ts(r), y: r.success ? r.avg    : null })), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)',  pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
+      { label: 'Jitter (ms)',   data: ping.map(r => ({ x: _ts(r), y: r.success ? r.jitter : null })), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
+      { label: 'TCP RTT (ms)',  data: tcp.map( r => ({ x: _ts(r), y: r.success ? r.rtt    : null })), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
     ];
     yScales = { y: { title: { display: true, text: 'ms', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
 
   } else if (tab === 'bandwidth') {
-    const rows = [...data.iperf3].reverse();
-    if (!rows.length) { document.getElementById('history-chart').getContext('2d').clearRect(0,0,9999,9999); return; }
+    const rows = prepRows(data.iperf3);
+    if (!rows.length) { document.getElementById('history-chart').getContext('2d').clearRect(0, 0, 9999, 9999); return; }
     datasets = [
-      { label: '↓ Download (Mbps)', data: rows.map((r,i) => ({x: ts(rows)[i], y: r.success ? r.download_mbps : null})), borderColor: CH.green, backgroundColor: 'rgba(63,185,80,0.08)',  tension: 0.3, spanGaps: true, yAxisID: 'y' },
-      { label: '↑ Upload (Mbps)',   data: rows.map((r,i) => ({x: ts(rows)[i], y: r.success ? r.upload_mbps   : null})), borderColor: CH.cyan,  backgroundColor: 'rgba(88,166,255,0.08)', tension: 0.3, spanGaps: true, yAxisID: 'y' },
+      { label: '\u2193 Download (Mbps)', data: rows.map(r => ({ x: _ts(r), y: r.success ? r.download_mbps : null })), borderColor: CH.green, backgroundColor: 'rgba(63,185,80,0.08)',  pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
+      { label: '\u2191 Upload (Mbps)',   data: rows.map(r => ({ x: _ts(r), y: r.success ? r.upload_mbps   : null })), borderColor: CH.cyan,  backgroundColor: 'rgba(88,166,255,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
     ];
     yScales = { y: { title: { display: true, text: 'Mbps', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
 
   } else if (tab === 'loss') {
-    const rows = [...data.ping].reverse();
+    const rows = prepRows(data.ping);
     datasets = [
-      { label: 'Loss (%)', data: rows.map((r,i) => ({x: ts(rows)[i], y: r.loss ?? null})), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true, tension: 0.3, spanGaps: true, yAxisID: 'y' },
+      { label: 'Loss (%)', data: rows.map(r => ({ x: _ts(r), y: r.loss ?? null })), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true, pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
     ];
     yScales = { y: { min: 0, max: 100, title: { display: true, text: '%', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
   }
 
   const ctx = document.getElementById('history-chart').getContext('2d');
-  // If the same host+tab is already showing, update data in place (no animation).
+
+  // Same host+tab already displayed — update in place without animation
   if (_chart && _chartHost === name && _chartTab === tab) {
     _chart.data.datasets = datasets;
+    _chart.options.scales.x.min = winStart;
+    _chart.options.scales.x.max = winEnd;
+    _chart.options.scales.x.time.unit = zl.tickUnit;
+    _chart.options.scales.x.ticks.stepSize = zl.stepSize;
+    _chart.options.plugins.tooltip.enabled = true;
     _chart.update('none');
     return;
   }
+
   if (_chart) { _chart.destroy(); _chart = null; }
   _chartHost = name;
   _chartTab  = tab;
@@ -466,13 +631,24 @@ function renderChart(name, tab) {
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { labels: { color: CH.text, boxWidth: 12, padding: 16 } },
-        tooltip: { backgroundColor: CH.surface, borderColor: CH.border, borderWidth: 1, titleColor: CH.text, bodyColor: CH.dim },
+        tooltip: {
+          enabled: true,
+          backgroundColor: CH.surface, borderColor: CH.border, borderWidth: 1,
+          titleColor: CH.text, bodyColor: CH.dim,
+        },
       },
       scales: {
         x: {
           type: 'time',
-          time: { tooltipFormat: 'MMM d HH:mm:ss', displayFormats: { second: 'HH:mm:ss', minute: 'HH:mm', hour: 'MMM d HH:mm' } },
-          ticks: { color: CH.dim, maxTicksLimit: 10 }, grid: { color: CH.border },
+          min: winStart,
+          max: winEnd,
+          time: {
+            unit: zl.tickUnit,
+            displayFormats: { minute: 'HH:mm', hour: 'HH:mm', day: 'MMM d', month: 'MMM yy' },
+            tooltipFormat: 'MMM d HH:mm:ss',
+          },
+          ticks: { color: CH.dim, stepSize: zl.stepSize },
+          grid:  { color: CH.border },
         },
         ...yScales,
       },
@@ -526,8 +702,9 @@ function refreshDashboard() {
         const jitter = p.success     ? p.jitter        : null;
         const loss   = p.loss != null ? p.loss         : null;
         const rtt    = t.success     ? t.rtt           : null;
-        const dl     = ip.success    ? ip.download_mbps : null;
-        const ul     = ip.success    ? ip.upload_mbps   : null;
+        const dl      = ip.success ? ip.download_mbps : null;
+        const ul      = ip.success ? ip.upload_mbps   : null;
+        const ipErr   = (ip.success === false && ip.error) ? ip.error : null;
 
         const safeName = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
         const sel = (_selectedHost === name) ? ' selected' : '';
@@ -541,8 +718,9 @@ function refreshDashboard() {
         html += '<td class="' + cls(jitter, pw*0.3, pc*0.3) + '">'+ fmt(jitter,' ms')+ '</td>';
         html += '<td class="' + cls(loss, lw, lc) + '">'          + fmt(loss, '%')   + '</td>';
         html += '<td class="' + cls(rtt, tw, tc) + '">'           + fmt(rtt, ' ms')  + '</td>';
-        html += '<td class="' + cls(dl, bw, bc, true) + '">'      + fmt(dl, '', 0)   + '</td>';
-        html += '<td class="' + cls(ul, bw, bc, true) + '">'      + fmt(ul, '', 0)   + '</td>';
+        const dlCell = dl != null ? fmt(dl, '', 0) : ipErr ? '<span class="val-yellow err-tip" title="' + escAttr(ipErr) + '">⚠</span>' : '—';
+        html += '<td class="' + cls(dl, bw, bc, true) + '">' + dlCell + '</td>';
+        html += '<td class="' + cls(ul, bw, bc, true) + '">' + fmt(ul, '', 0) + '</td>';
         html += '<td onclick="event.stopPropagation()">';
         html += '<button class="btn-sm btn-run" id="run-'+i+'" onclick="triggerIperf3('+i+')" title="Run bandwidth test now">⚡</button> ';
         html += '<button class="btn-sm btn-edit" onclick="toggleEdit('+i+')">✎</button> ';
@@ -565,16 +743,8 @@ function refreshDashboard() {
         const newEl = document.getElementById(id);
         if (newEl) newEl.parentNode.replaceChild(savedEl, newEl);
       });
-      // Silently refresh history chart if a host is selected
-      if (_selectedHost) {
-        fetch('/api/history/' + encodeURIComponent(_selectedHost))
-          .then(r => r.json())
-          .then(d => {
-            _historyCache[_selectedHost] = d;
-            if (_chart) renderChart(_selectedHost, document.querySelector('.chart-tab.active')?.dataset.tab || 'latency');
-          })
-          .catch(() => {});
-      }
+      // Silently refresh history chart if host is selected and in live mode
+      if (_selectedHost && _windowEnd === null) fetchAndRender(_selectedHost, currentTab());
     })
     .catch(() => {});
 }

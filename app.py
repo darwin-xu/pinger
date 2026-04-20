@@ -141,11 +141,12 @@ def trigger_iperf3(idx: int):
 
 @app.route("/api/history/<host>")
 def api_history(host: str):
-    limit = request.args.get("limit", 300, type=int)
+    limit = min(request.args.get("limit", 1000, type=int), 50000)
+    since = request.args.get("since") or None
     return jsonify(
-        ping=storage.recent(host, "ping", limit=limit),
-        tcp=storage.recent(host, "tcp", limit=limit),
-        iperf3=storage.recent(host, "iperf3", limit=limit),
+        ping=storage.recent(host, "ping", limit=limit, since=since),
+        tcp=storage.recent(host, "tcp",  limit=limit, since=since),
+        iperf3=storage.recent(host, "iperf3", limit=limit, since=since),
     )
 
 
