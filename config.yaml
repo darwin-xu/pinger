@@ -30,12 +30,10 @@ hosts:
   ssh_port: 22
   iperf3: true
   password: REDACTED
-- name: v
+- name: v1
   host: 64.176.61.229
   ssh_user: root
   ssh_port: 22
-  iperf3: true
-  password: REDACTED
 - name: v2
   host: 158.247.227.13
   ssh_user: root

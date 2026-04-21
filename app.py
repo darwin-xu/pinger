@@ -141,12 +141,18 @@ def trigger_iperf3(idx: int):
 
 @app.route("/api/history/<host>")
 def api_history(host: str):
+    # Resolve display name → IP so history is stable across renames
+    cfg = _cfg()
+    host_ip = next(
+        (h["host"] for h in cfg.get("hosts", []) if h["name"] == host),
+        host,  # fall back to the value itself (e.g. direct IP lookup)
+    )
     limit = min(request.args.get("limit", 1000, type=int), 50000)
     since = request.args.get("since") or None
     return jsonify(
-        ping=storage.recent(host, "ping", limit=limit, since=since),
-        tcp=storage.recent(host, "tcp",  limit=limit, since=since),
-        iperf3=storage.recent(host, "iperf3", limit=limit, since=since),
+        ping=storage.recent(host_ip, "ping", limit=limit, since=since),
+        tcp=storage.recent(host_ip, "tcp",  limit=limit, since=since),
+        iperf3=storage.recent(host_ip, "iperf3", limit=limit, since=since),
     )
 
 

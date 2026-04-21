@@ -55,12 +55,12 @@ class ProbeEngine:
                 name = h["name"]
                 if name not in self.history:
                     self.history[name] = deque(maxlen=20)
-                # Pre-load from DB
+                # Pre-load from DB (keyed by IP so renames don't lose history)
                 for probe_name in ("ping", "tcp", "iperf3"):
-                    row = storage.latest(name, probe_name)
+                    row = storage.latest(h["host"], probe_name)
                     if row:
                         self.results[name][probe_name] = row
-                for row in reversed(storage.recent(name, "ping", limit=20)):
+                for row in reversed(storage.recent(h["host"], "ping", limit=20)):
                     if row.get("success") and row.get("avg") is not None:
                         self.history[name].append(row["avg"])
 
@@ -79,8 +79,8 @@ class ProbeEngine:
         ping_r = ping_probe.probe(host, count=self.cfg.get("ping_count", 10))
         tcp_r  = tcp_probe.probe(host, port=ssh_port)
 
-        storage.save(name, "ping", ping_r)
-        storage.save(name, "tcp",  tcp_r)
+        storage.save(host, "ping", ping_r)
+        storage.save(host, "tcp",  tcp_r)
 
         ts = datetime.utcnow().isoformat()
         with self._lock:
@@ -98,7 +98,7 @@ class ProbeEngine:
             duration=self.cfg.get("iperf3_duration", 5),
             iperf3_port=self.cfg.get("iperf3_port", 5201),
         )
-        storage.save(name, "iperf3", r)
+        storage.save(h["host"], "iperf3", r)
         ts = datetime.utcnow().isoformat()
         with self._lock:
             self.results[name]["iperf3"] = {"ts": ts, **r}

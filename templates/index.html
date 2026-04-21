@@ -299,16 +299,12 @@
     <span id="chart-range-label" class="zoom-range-label"></span>
     <div class="zoom-btns">
       <button class="zoom-nav-btn" onclick="panLeft()"  title="Pan left">&#9664;</button>
-      <button class="zoom-nav-btn" onclick="zoomOut()"  title="Zoom out">&#8722;</button>
-      <span class="zoom-sep"></span>
       <button class="zoom-level-btn" id="zlbtn-0" onclick="setZoomLevel(0)">10m</button>
       <button class="zoom-level-btn" id="zlbtn-1" onclick="setZoomLevel(1)">1h</button>
       <button class="zoom-level-btn" id="zlbtn-2" onclick="setZoomLevel(2)">12h</button>
       <button class="zoom-level-btn" id="zlbtn-3" onclick="setZoomLevel(3)">1d</button>
       <button class="zoom-level-btn" id="zlbtn-4" onclick="setZoomLevel(4)">7d</button>
       <button class="zoom-level-btn" id="zlbtn-5" onclick="setZoomLevel(5)">1mo</button>
-      <span class="zoom-sep"></span>
-      <button class="zoom-nav-btn" onclick="zoomIn()"   title="Zoom in">&#43;</button>
       <button class="zoom-nav-btn" onclick="panRight()" title="Pan right">&#9654;</button>
       <button class="zoom-live-btn" id="btn-live" onclick="setLive()">&#9679; live</button>
     </div>
@@ -560,6 +556,15 @@ function updateZoomControls(winStart, winEnd) {
   if (el) el.textContent = fmtDate(winStart) + ' \u2013 ' + fmtDate(winEnd);
 }
 
+function fmtMs(v) {
+  if (v == null) return '';
+  if (v >= 1000) {
+    const s = v / 1000;
+    return (s % 1 === 0 ? s.toFixed(0) : parseFloat(s.toFixed(2)).toString()) + ' s';
+  }
+  return (v % 1 === 0 ? v.toFixed(0) : parseFloat(v.toFixed(2)).toString()) + ' ms';
+}
+
 function renderChart(name, tab, data, winStart, winEnd) {
   const CH = { bg: '#0d1117', surface: '#161b22', border: '#30363d',
                 text: '#c9d1d9', dim: '#8b949e', green: '#3fb950',
@@ -587,7 +592,7 @@ function renderChart(name, tab, data, winStart, winEnd) {
       { label: 'Jitter (ms)',   data: ping.map(r => ({ x: _ts(r), y: r.success ? r.jitter : null })), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
       { label: 'TCP RTT (ms)',  data: tcp.map( r => ({ x: _ts(r), y: r.success ? r.rtt    : null })), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
     ];
-    yScales = { y: { title: { display: true, text: 'ms', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
+    yScales = { y: { title: { display: true, text: 'latency', color: CH.dim }, ticks: { color: CH.dim, callback: v => fmtMs(v) }, grid: { color: CH.border } } };
 
   } else if (tab === 'bandwidth') {
     const rows = prepRows(data.iperf3);
@@ -635,6 +640,9 @@ function renderChart(name, tab, data, winStart, winEnd) {
           enabled: true,
           backgroundColor: CH.surface, borderColor: CH.border, borderWidth: 1,
           titleColor: CH.text, bodyColor: CH.dim,
+          callbacks: tab === 'latency' ? {
+            label: ctx => ctx.dataset.label.split(' (')[0] + ': ' + fmtMs(ctx.parsed.y)
+          } : {},
         },
       },
       scales: {
