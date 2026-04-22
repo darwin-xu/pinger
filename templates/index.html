@@ -289,28 +289,34 @@
 <div id="chart-section" style="display:none; margin-bottom:32px">
   <div class="table-header" style="margin-bottom:6px">
     <h2>History &mdash; <span id="chart-host-name"></span></h2>
-    <div>
-      <button class="chart-tab active" data-tab="latency"  onclick="switchChartTab('latency')">Latency</button>
-      <button class="chart-tab"        data-tab="bandwidth" onclick="switchChartTab('bandwidth')">Bandwidth</button>
-      <button class="chart-tab"        data-tab="loss"      onclick="switchChartTab('loss')">Loss</button>
+    <div class="zoom-controls" style="margin-bottom:0">
+      <span id="chart-range-label" class="zoom-range-label"></span>
+      <div class="zoom-btns">
+        <button class="zoom-nav-btn" onclick="panLeft()"  title="Pan left">&#9664;</button>
+        <button class="zoom-level-btn" id="zlbtn-0" onclick="setZoomLevel(0)">10m</button>
+        <button class="zoom-level-btn" id="zlbtn-1" onclick="setZoomLevel(1)">1h</button>
+        <button class="zoom-level-btn" id="zlbtn-2" onclick="setZoomLevel(2)">12h</button>
+        <button class="zoom-level-btn" id="zlbtn-3" onclick="setZoomLevel(3)">1d</button>
+        <button class="zoom-level-btn" id="zlbtn-4" onclick="setZoomLevel(4)">7d</button>
+        <button class="zoom-level-btn" id="zlbtn-5" onclick="setZoomLevel(5)">1mo</button>
+        <button class="zoom-nav-btn" onclick="panRight()" title="Pan right">&#9654;</button>
+        <button class="zoom-live-btn" id="btn-live" onclick="setLive()">&#9679; live</button>
+      </div>
     </div>
   </div>
-  <div class="zoom-controls">
-    <span id="chart-range-label" class="zoom-range-label"></span>
-    <div class="zoom-btns">
-      <button class="zoom-nav-btn" onclick="panLeft()"  title="Pan left">&#9664;</button>
-      <button class="zoom-level-btn" id="zlbtn-0" onclick="setZoomLevel(0)">10m</button>
-      <button class="zoom-level-btn" id="zlbtn-1" onclick="setZoomLevel(1)">1h</button>
-      <button class="zoom-level-btn" id="zlbtn-2" onclick="setZoomLevel(2)">12h</button>
-      <button class="zoom-level-btn" id="zlbtn-3" onclick="setZoomLevel(3)">1d</button>
-      <button class="zoom-level-btn" id="zlbtn-4" onclick="setZoomLevel(4)">7d</button>
-      <button class="zoom-level-btn" id="zlbtn-5" onclick="setZoomLevel(5)">1mo</button>
-      <button class="zoom-nav-btn" onclick="panRight()" title="Pan right">&#9654;</button>
-      <button class="zoom-live-btn" id="btn-live" onclick="setLive()">&#9679; live</button>
+  <div style="display:flex; flex-direction:column; gap:12px">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px">Latency</div>
+      <div style="height:220px"><canvas id="history-chart-latency"></canvas></div>
     </div>
-  </div>
-  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;height:300px">
-    <canvas id="history-chart"></canvas>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px">Bandwidth</div>
+      <div style="height:160px"><canvas id="history-chart-bandwidth"></canvas></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px">Loss</div>
+      <div style="height:130px"><canvas id="history-chart-loss"></canvas></div>
+    </div>
   </div>
 </div>
 <div class="modal-overlay" id="modal-add" onclick="closeModalIfBg(event, 'modal-add')">
@@ -390,9 +396,8 @@ const ZOOM_LEVELS = [
   { label: '7d',  tickMs:    604_800_000, windowMs:    6_048_000_000, tickUnit: 'day',    stepSize: 7  },
   { label: '1mo', tickMs:  2_592_000_000, windowMs:   25_920_000_000, tickUnit: 'month',  stepSize: 1  },
 ];
-let _chart     = null;
+let _charts    = {};   // keyed by tab name
 let _chartHost = null;
-let _chartTab  = null;
 let _zoomIdx   = 1;      // default: 1 h
 let _windowEnd = null;   // null = live (right edge = now)
 let _selectedHost = null;
@@ -492,7 +497,7 @@ function aggregateSeries(rows, winStart, winEnd, buckets) {
 }
 
 function currentTab() {
-  return document.querySelector('.chart-tab.active')?.dataset.tab || 'latency';
+  return 'latency'; // kept for any legacy callers; tabs removed
 }
 
 function selectHost(name, idx) {
@@ -503,12 +508,11 @@ function selectHost(name, idx) {
   if (row) row.classList.add('selected');
   document.getElementById('chart-host-name').textContent = name;
   document.getElementById('chart-section').style.display = 'block';
-  fetchAndRender(name, currentTab());
+  fetchAndRender(name);
 }
 
 function switchChartTab(tab) {
-  document.querySelectorAll('.chart-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  if (_selectedHost) fetchAndRender(_selectedHost, tab);
+  // no-op: tabs removed, all charts shown simultaneously
 }
 
 function zoomIn()  { if (_zoomIdx > 0)                    { _zoomIdx--; _applyZoom(); } }
@@ -521,9 +525,9 @@ function panRight()  {
   _windowEnd = end >= Date.now() - 5000 ? null : end;
   _applyZoom();
 }
-function _applyZoom() { if (_selectedHost) fetchAndRender(_selectedHost, currentTab()); }
+function _applyZoom() { if (_selectedHost) fetchAndRender(_selectedHost); }
 
-function fetchAndRender(name, tab) {
+function fetchAndRender(name) {
   const zl     = ZOOM_LEVELS[_zoomIdx];
   // Align winEnd UP to the next tick boundary so window = exactly 10 ticks
   const winEnd = tickCeil(_windowEnd || Date.now(), zl);
@@ -536,7 +540,10 @@ function fetchAndRender(name, tab) {
   fetch('/api/history/' + encodeURIComponent(name) +
         '?since=' + encodeURIComponent(since) + '&limit=' + limit)
     .then(r => r.json())
-    .then(data => { renderChart(name, tab, data, winStart, winEnd); updateZoomControls(winStart, winEnd); })
+    .then(data => {
+      ['latency', 'bandwidth', 'loss'].forEach(tab => renderChart(name, tab, data, winStart, winEnd));
+      updateZoomControls(winStart, winEnd);
+    })
     .catch(() => {});
 }
 
@@ -596,7 +603,11 @@ function renderChart(name, tab, data, winStart, winEnd) {
 
   } else if (tab === 'bandwidth') {
     const rows = prepRows(data.iperf3);
-    if (!rows.length) { document.getElementById('history-chart').getContext('2d').clearRect(0, 0, 9999, 9999); return; }
+    if (!rows.length) {
+      const bctx = document.getElementById('history-chart-bandwidth');
+      if (bctx) bctx.getContext('2d').clearRect(0, 0, 9999, 9999);
+      return;
+    }
     datasets = [
       { label: '\u2193 Download (Mbps)', data: rows.map(r => ({ x: _ts(r), y: r.success ? r.download_mbps : null })), borderColor: CH.green, backgroundColor: 'rgba(63,185,80,0.08)',  pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
       { label: '\u2191 Upload (Mbps)',   data: rows.map(r => ({ x: _ts(r), y: r.success ? r.upload_mbps   : null })), borderColor: CH.cyan,  backgroundColor: 'rgba(88,166,255,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
@@ -611,24 +622,25 @@ function renderChart(name, tab, data, winStart, winEnd) {
     yScales = { y: { min: 0, max: 100, title: { display: true, text: '%', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
   }
 
-  const ctx = document.getElementById('history-chart').getContext('2d');
+  const canvasEl = document.getElementById('history-chart-' + tab);
+  if (!canvasEl) return;
+  const ctx = canvasEl.getContext('2d');
 
   // Same host+tab already displayed — update in place without animation
-  if (_chart && _chartHost === name && _chartTab === tab) {
-    _chart.data.datasets = datasets;
-    _chart.options.scales.x.min = winStart;
-    _chart.options.scales.x.max = winEnd;
-    _chart.options.scales.x.time.unit = zl.tickUnit;
-    _chart.options.scales.x.ticks.stepSize = zl.stepSize;
-    _chart.options.plugins.tooltip.enabled = true;
-    _chart.update('none');
+  if (_charts[tab] && _chartHost === name) {
+    _charts[tab].data.datasets = datasets;
+    _charts[tab].options.scales.x.min = winStart;
+    _charts[tab].options.scales.x.max = winEnd;
+    _charts[tab].options.scales.x.time.unit = zl.tickUnit;
+    _charts[tab].options.scales.x.ticks.stepSize = zl.stepSize;
+    _charts[tab].options.plugins.tooltip.enabled = true;
+    _charts[tab].update('none');
     return;
   }
 
-  if (_chart) { _chart.destroy(); _chart = null; }
+  if (_charts[tab]) { _charts[tab].destroy(); _charts[tab] = null; }
   _chartHost = name;
-  _chartTab  = tab;
-  _chart = new Chart(ctx, {
+  _charts[tab] = new Chart(ctx, {
     type: 'line',
     data: { datasets },
     options: {
@@ -752,7 +764,7 @@ function refreshDashboard() {
         if (newEl) newEl.parentNode.replaceChild(savedEl, newEl);
       });
       // Silently refresh history chart if host is selected and in live mode
-      if (_selectedHost && _windowEnd === null) fetchAndRender(_selectedHost, currentTab());
+      if (_selectedHost && _windowEnd === null) fetchAndRender(_selectedHost);
     })
     .catch(() => {});
 }
