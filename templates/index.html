@@ -477,7 +477,7 @@ function _ts(r) { return r.ts.endsWith('Z') ? r.ts : r.ts + 'Z'; }
 function aggregateSeries(rows, winStart, winEnd, buckets) {
   const bucketMs = (winEnd - winStart) / buckets;
   const agg = Array.from({ length: buckets }, (_, i) => ({
-    t: winStart + (i + 0.5) * bucketMs, sums: {}, count: 0,
+    t: winStart + (i + 0.5) * bucketMs, sums: {}, counts: {}, count: 0,
   }));
   const FIELDS = ['avg','min','max','jitter','loss','p95','rtt','download_mbps','upload_mbps'];
   for (const row of rows) {
@@ -485,13 +485,16 @@ function aggregateSeries(rows, winStart, winEnd, buckets) {
     if (t < winStart || t > winEnd) continue;
     const bi = Math.min(Math.floor((t - winStart) / bucketMs), buckets - 1);
     for (const f of FIELDS) {
-      if (row[f] != null) agg[bi].sums[f] = (agg[bi].sums[f] || 0) + row[f];
+      if (row[f] != null) {
+        agg[bi].sums[f]   = (agg[bi].sums[f]   || 0) + row[f];
+        agg[bi].counts[f] = (agg[bi].counts[f]  || 0) + 1;
+      }
     }
     agg[bi].count++;
   }
   return agg.filter(b => b.count > 0).map(b => {
     const r = { ts: new Date(b.t).toISOString(), success: true };
-    for (const [f, s] of Object.entries(b.sums)) r[f] = s / b.count;
+    for (const [f, s] of Object.entries(b.sums)) r[f] = s / b.counts[f];
     return r;
   });
 }
