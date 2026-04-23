@@ -247,10 +247,10 @@
     {% else %}<span class="val-green">✓</span>
     {% endif %}
   </td>
-  <td>{{ ('%0.1f ms' % p.avg) if p.get('success') and p.avg is not none else '—' }}</td>
-  <td>{{ ('%0.1f ms' % p.jitter) if p.get('success') and p.jitter is not none else '—' }}</td>
-  <td>{{ ('%0.1f%%' % p.loss) if p.loss is defined and p.loss is not none else '—' }}</td>
-  <td>{{ ('%0.1f ms' % t.rtt) if t.get('success') and t.rtt is not none else '—' }}</td>
+  <td>{{ p.avg | fmt_duration if p.get('success') and p.avg is not none else '—' }}</td>
+  <td>{{ p.jitter | fmt_duration if p.get('success') and p.jitter is not none else '—' }}</td>
+  <td>{{ ('%0.2f%%' % p.loss) if p.loss is defined and p.loss is not none else '—' }}</td>
+  <td>{{ t.rtt | fmt_duration if t.get('success') and t.rtt is not none else '—' }}</td>
   <td>{% if ip.get('success') and ip.download_mbps is not none %}{{ '%0.0f' % ip.download_mbps }}{% elif ip.get('success') == false and ip.get('error') %}<span class="val-yellow err-tip" title="{{ ip.get('error')|e }}">⚠</span>{% else %}—{% endif %}</td>
   <td>{{ ('%0.0f' % ip.upload_mbps) if ip.get('success') and ip.upload_mbps is not none else '—' }}</td>
   <td onclick="event.stopPropagation()">
@@ -563,14 +563,38 @@ function updateZoomControls(winStart, winEnd) {
   if (el) el.textContent = fmtDate(winStart) + ' \u2013 ' + fmtDate(winEnd);
 }
 
-function fmtMs(v) {
-  if (v == null) return '';
-  if (v >= 1000) {
-    const s = v / 1000;
-    return (s % 1 === 0 ? s.toFixed(0) : parseFloat(s.toFixed(2)).toString()) + ' s';
-  }
-  return (v % 1 === 0 ? v.toFixed(0) : parseFloat(v.toFixed(2)).toString()) + ' ms';
+function fmtNum(v) {
+  // ≤2 decimal places, trailing zeros stripped, thousands separator
+  const r = Math.round(v * 100) / 100;
+  const s = r.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return s;
 }
+
+function fmtDur(ms) {
+  // Mirrors formatting.fmt_duration in Python
+  if (ms == null) return '—';
+  if (ms < 0.001)   return fmtNum(ms * 1_000_000) + ' ns';
+  if (ms < 1)       return fmtNum(ms * 1_000) + ' \u03bcs';
+  if (ms < 1_000)   return fmtNum(ms) + ' ms';
+  if (ms < 60_000)  return fmtNum(ms / 1_000) + ' s';
+  const totalSec = Math.round(ms / 1_000);
+  const sec = totalSec % 60;
+  const totalMin = Math.floor(totalSec / 60);
+  const min = totalMin % 60;
+  const totalHr = Math.floor(totalMin / 60);
+  const pad2 = n => String(n).padStart(2, '0');
+  if (ms < 86_400_000) return `${pad2(totalHr)}:${pad2(min)}:${pad2(sec)}`;
+  const day = Math.floor(totalHr / 24);
+  const hr  = totalHr % 24;
+  const fmtHms = `${pad2(hr)}:${pad2(min)}:${pad2(sec)}`;
+  if (ms < 365 * 86_400_000) return `${day.toLocaleString('en-US')} d ${fmtHms}`;
+  const yr  = Math.floor(day / 365);
+  const rem = day % 365;
+  return `${yr.toLocaleString('en-US')} y ${rem.toLocaleString('en-US')} d ${fmtHms}`;
+}
+
+// Legacy alias used by chart tooltip
+function fmtMs(v) { return fmtDur(v); }
 
 function renderChart(name, tab, data, winStart, winEnd) {
   const CH = { bg: '#0d1117', surface: '#161b22', border: '#30363d',
@@ -707,7 +731,9 @@ function refreshDashboard() {
         }
         function fmt(v, suf, dec) {
           if (v == null) return '—';
-          return v.toFixed(dec !== undefined ? dec : 1) + (suf || '');
+          if (suf === ' ms' || suf === 'ms') return fmtDur(v);
+          const r = Math.round(v * 100) / 100;
+          return r.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: dec !== undefined ? dec : 2 }) + (suf || '');
         }
 
         let icon = '?';

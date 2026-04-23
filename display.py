@@ -6,6 +6,8 @@ from datetime import datetime
 from rich import box
 from rich.table import Table
 
+from formatting import fmt_duration
+
 # Eight-step block characters (▁ = quietest, █ = loudest)
 _BLOCKS = "▁▂▃▄▅▆▇█"
 
@@ -34,13 +36,17 @@ def _color_val(
     warn: float,
     crit: float,
     higher_is_worse: bool = True,
-    fmt: str = ".1f",
+    fmt: str = ".2f",
     suffix: str = "",
+    use_duration: bool = False,
 ) -> str:
     """Return a Rich markup string for a numeric value, color-coded by thresholds."""
     if val is None:
         return "[dim]—[/dim]"
-    s = format(val, fmt) + suffix
+    if use_duration:
+        s = fmt_duration(val)
+    else:
+        s = format(val, fmt) + suffix
     if higher_is_worse:
         color = "red" if val >= crit else "yellow" if val >= warn else "green"
     else:
@@ -149,10 +155,10 @@ def build_table(
             name,
             host,
             _status_icon(ping_d, tcp_d),
-            _color_val(avg,          thr["pw"], thr["pc"], suffix=" ms"),
-            _color_val(jitter,       jw,        jc,        suffix=" ms"),
-            _color_val(loss,         thr["lw"], thr["lc"], suffix="%"),
-            _color_val(tcp_rtt,      thr["tw"], thr["tc"], suffix=" ms"),
+            _color_val(avg,          thr["pw"], thr["pc"], use_duration=True),
+            _color_val(jitter,       jw,        jc,        use_duration=True),
+            _color_val(loss,         thr["lw"], thr["lc"], suffix="%", fmt=".2f"),
+            _color_val(tcp_rtt,      thr["tw"], thr["tc"], use_duration=True),
             _color_val(download_mbps, thr["bw"], thr["bc"], higher_is_worse=False, fmt=".0f"),
             _color_val(upload_mbps,   thr["bw"], thr["bc"], higher_is_worse=False, fmt=".0f"),
             f"[cyan]{spark}[/cyan]",

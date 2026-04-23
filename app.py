@@ -20,8 +20,10 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 from engine import ProbeEngine, load_config, save_config
 import storage
+from formatting import fmt_duration
 
 app = Flask(__name__)
+app.jinja_env.filters["fmt_duration"] = fmt_duration
 
 # Global engine reference (initialised in main)
 engine: ProbeEngine | None = None
