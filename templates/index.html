@@ -402,6 +402,8 @@ let _zoomIdx   = 1;      // default: 1 h
 let _windowEnd = null;   // null = live (right edge = now)
 let _selectedHost = null;
 let _selectedIdx  = null;
+let _tcpFailed = [];          // raw failed TCP rows for current latency window
+let _tcpFailedThreshold = 20_000; // ms tolerance for tooltip match
 
 function escAttr(s) {
   return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -621,12 +623,25 @@ function renderChart(name, tab, data, winStart, winEnd) {
   if (tab === 'latency') {
     const ping = prepRows(data.ping);
     const tcp  = prepRows(data.tcp);
+    // Raw failed TCP probes within the window — used for failure markers and tooltip
+    const tcpFailed = [...data.tcp].reverse().filter(r => {
+      const t = new Date(_ts(r)).getTime();
+      return t >= winStart && t <= winEnd && r.success === false;
+    });
+    _tcpFailed = tcpFailed;
+    _tcpFailedThreshold = aggregated ? (winEnd - winStart) / 200 : 20_000;
     datasets = [
       { label: 'Ping avg (ms)', data: ping.map(r => ({ x: _ts(r), y: r.success ? r.avg    : null })), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)',  pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
       { label: 'Jitter (ms)',   data: ping.map(r => ({ x: _ts(r), y: r.success ? r.jitter : null })), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
       { label: 'TCP RTT (ms)',  data: tcp.map( r => ({ x: _ts(r), y: r.success ? r.rtt    : null })), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
+      { label: 'TCP RTT failed', type: 'scatter',
+        data: tcpFailed.map(r => ({ x: _ts(r), y: 0 })),
+        pointStyle: 'crossRot', pointRadius: 5, pointHoverRadius: 6, pointBorderWidth: 2,
+        pointBorderColor: CH.red, pointBackgroundColor: 'transparent',
+        borderColor: 'transparent', backgroundColor: 'transparent',
+        showLine: false, yAxisID: 'y' },
     ];
-    yScales = { y: { title: { display: true, text: 'latency', color: CH.dim }, ticks: { color: CH.dim, callback: v => fmtMs(v) }, grid: { color: CH.border } } };
+    yScales = { y: { min: 0, title: { display: true, text: 'latency', color: CH.dim }, ticks: { color: CH.dim, callback: v => fmtMs(v) }, grid: { color: CH.border } } };
 
   } else if (tab === 'bandwidth') {
     const rows = prepRows(data.iperf3);
@@ -679,8 +694,18 @@ function renderChart(name, tab, data, winStart, winEnd) {
           enabled: true,
           backgroundColor: CH.surface, borderColor: CH.border, borderWidth: 1,
           titleColor: CH.text, bodyColor: CH.dim,
+          // Exclude the failure scatter from the pooled index tooltip
+          filter: item => item.dataset.label !== 'TCP RTT failed',
           callbacks: tab === 'latency' ? {
-            label: ctx => ctx.dataset.label.split(' (')[0] + ': ' + fmtMs(ctx.parsed.y)
+            label: ctx => ctx.dataset.label.split(' (')[0] + ': ' + fmtMs(ctx.parsed.y),
+            afterBody: items => {
+              if (!items.length || !_tcpFailed.length) return;
+              const hx = items[0].parsed.x;
+              const hit = _tcpFailed.some(
+                r => Math.abs(new Date(_ts(r)).getTime() - hx) < _tcpFailedThreshold
+              );
+              return hit ? ['✗ TCP RTT: failed'] : [];
+            },
           } : {},
         },
       },
