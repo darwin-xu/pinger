@@ -247,10 +247,10 @@
     {% else %}<span class="val-green">✓</span>
     {% endif %}
   </td>
-  <td>{{ p.avg | fmt_duration if p.get('success') and p.avg is not none else '—' }}</td>
-  <td>{{ p.jitter | fmt_duration if p.get('success') and p.jitter is not none else '—' }}</td>
+  <td>{% if p.get('success') and p.avg is not none %}{{ p.avg | fmt_duration }}{% elif p.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
+  <td>{% if p.get('success') and p.jitter is not none %}{{ p.jitter | fmt_duration }}{% elif p.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
   <td>{{ ('%0.2f%%' % p.loss) if p.loss is defined and p.loss is not none else '—' }}</td>
-  <td>{{ t.rtt | fmt_duration if t.get('success') and t.rtt is not none else '—' }}</td>
+  <td>{% if t.get('success') and t.rtt is not none %}{{ t.rtt | fmt_duration }}{% elif t.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
   <td>{% if ip.get('success') and ip.download_mbps is not none %}{{ '%0.0f' % ip.download_mbps }}{% elif ip.get('success') == false and ip.get('error') %}<span class="val-yellow err-tip" title="{{ ip.get('error')|e }}">⚠</span>{% else %}—{% endif %}</td>
   <td>{{ ('%0.0f' % ip.upload_mbps) if ip.get('success') and ip.upload_mbps is not none else '—' }}</td>
   <td onclick="event.stopPropagation()">
@@ -763,10 +763,11 @@ function refreshDashboard() {
         html += '<td><strong>' + name + '</strong></td>';
         html += '<td class="host-col">' + h.host + '</td>';
         html += '<td class="icon">' + icon + '</td>';
-        html += '<td class="' + cls(avg, pw, pc) + '">'           + fmt(avg, ' ms')  + '</td>';
-        html += '<td class="' + cls(jitter, pw*0.3, pc*0.3) + '">'+ fmt(jitter,' ms')+ '</td>';
-        html += '<td class="' + cls(loss, lw, lc) + '">'          + fmt(loss, '%')   + '</td>';
-        html += '<td class="' + cls(rtt, tw, tc) + '">'           + fmt(rtt, ' ms')  + '</td>';
+        const FAIL = '<span class="val-red">✗</span>';
+        html += '<td class="' + cls(avg, pw, pc) + '">'           + (p.success === false ? FAIL : fmt(avg, ' ms'))   + '</td>';
+        html += '<td class="' + cls(jitter, pw*0.3, pc*0.3) + '">'+ (p.success === false ? FAIL : fmt(jitter,' ms')) + '</td>';
+        html += '<td class="' + cls(loss, lw, lc) + '">'          + fmt(loss, '%')                                    + '</td>';
+        html += '<td class="' + cls(rtt, tw, tc) + '">'           + (t.success === false ? FAIL : fmt(rtt, ' ms'))   + '</td>';
         const dlCell = dl != null ? fmt(dl, '', 0) : ipErr ? '<span class="val-yellow err-tip" title="' + escAttr(ipErr) + '">⚠</span>' : '—';
         html += '<td class="' + cls(dl, bw, bc, true) + '">' + dlCell + '</td>';
         html += '<td class="' + cls(ul, bw, bc, true) + '">' + fmt(ul, '', 0) + '</td>';
