@@ -30,6 +30,9 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# Config with secrets — use config.yaml.example as a template
+config.yaml
+
 # SQLite database
 *.db
 pinger.db

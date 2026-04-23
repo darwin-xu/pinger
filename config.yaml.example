@@ -23,13 +23,13 @@ hosts:
   ssh_user: root
   ssh_port: 22
   iperf3: true
-  password: REDACTED
+  password: YOUR_SSH_PASSWORD  # optional; prefer SSH keys
 - name: nube-1
   host: 64.118.149.162
   ssh_user: root
   ssh_port: 22
   iperf3: true
-  password: REDACTED
+  password: YOUR_SSH_PASSWORD  # optional; prefer SSH keys
 - name: v1
   host: 64.176.61.229
   ssh_user: root
@@ -38,4 +38,4 @@ hosts:
   host: 158.247.227.13
   ssh_user: root
   ssh_port: 22
-  password: REDACTED
+  password: YOUR_SSH_PASSWORD  # optional; prefer SSH keys
