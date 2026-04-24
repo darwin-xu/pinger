@@ -455,23 +455,38 @@ function tickCeil(ms, zl) {
 // (clock removed)
 
 // ── Version check ─────────────────────────────────────────────────────────────
-let _currentVersion = null;
+// Version check: prefer checksum and show server start time
+let _currentChecksum = null;
 function checkVersion() {
   fetch('/api/version')
     .then(r => r.json())
     .then(d => {
-      const v = d.version || 'dev';
-      if (_currentVersion === null) {
-        // First load: record version and display it
-        _currentVersion = v;
+      const c = d.checksum || null;
+      const start = d.server_start || null;
+      if (_currentChecksum === null) {
+        // First load: record checksum and display it with server start time
+        _currentChecksum = c;
         const el = document.getElementById('app-version');
-        if (el) el.textContent = 'v ' + v;
-      } else if (v !== _currentVersion) {
-        // Server was redeployed mid-session
-        const banner = document.getElementById('stale-banner');
-        if (banner) {
-          banner.textContent = '⚠ New version deployed (' + v + '). Click to reload.';
-          banner.style.display = 'block';
+        if (el) {
+          let text = 'v ' + (c ? c.slice(0, 8) : (d.version || 'dev'));
+          if (start) {
+            try {
+              const dt = new Date(start);
+              text += ' · started ' + dt.toLocaleString();
+            } catch (e) {
+              text += ' · started ' + start;
+            }
+          }
+          el.textContent = text;
+        }
+      } else {
+        // Detect checksum change (preferred)
+        if (c && _currentChecksum && c !== _currentChecksum) {
+          const banner = document.getElementById('stale-banner');
+          if (banner) {
+            banner.textContent = '⚠ New code deployed (checksum ' + c.slice(0,8) + '). Click to reload.';
+            banner.style.display = 'block';
+          }
         }
       }
     })
@@ -704,7 +719,7 @@ Chart.register({
       const cy = yScale.getPixelForValue(rttY);
       if (!isFinite(cy) || cy < top || cy > bottom) continue;
 
-      const r = 6;
+      const r = 4;
       ctx.beginPath();
       ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx + r, cy + r);
       ctx.moveTo(cx + r, cy - r); ctx.lineTo(cx - r, cy + r);

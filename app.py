@@ -16,6 +16,8 @@ from __future__ import annotations
 import argparse
 import os
 import threading
+from datetime import datetime
+from checksum import compute_repo_checksum
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 
@@ -28,6 +30,8 @@ app.jinja_env.filters["fmt_duration"] = fmt_duration
 
 # Global engine reference (initialised in main)
 engine: ProbeEngine | None = None
+# Server start timestamp (ISO 8601 UTC) — set in main()
+server_start: str | None = None
 
 
 def _cfg() -> dict:
@@ -144,13 +148,12 @@ def trigger_iperf3(idx: int):
 
 @app.route("/api/version")
 def api_version():
-    ver_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt")
+    # Return checksum (from repository files) and server start time.
     try:
-        with open(ver_file) as f:
-            version = f.read().strip()
-    except FileNotFoundError:
-        version = "dev"
-    return jsonify({"version": version})
+        checksum = compute_repo_checksum()
+    except Exception:
+        checksum = None
+    return jsonify({"checksum": checksum, "server_start": server_start})
 
 
 # ── History API ───────────────────────────────────────────────────
@@ -199,6 +202,7 @@ def update_settings():
 
 def main() -> None:
     global engine
+    global server_start
 
     parser = argparse.ArgumentParser(description="pinger web UI")
     parser.add_argument("--port", type=int, default=8080, help="Web UI port (default: 8080)")
@@ -209,6 +213,8 @@ def main() -> None:
     cfg = load_config(args.config)
     engine = ProbeEngine(cfg)
     engine.start()
+    # Record server start time for version API (UTC ISO format)
+    server_start = datetime.utcnow().isoformat() + 'Z'
 
     print(f"Dashboard: http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=False)
