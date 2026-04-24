@@ -185,6 +185,16 @@
   .zoom-live-btn.paused { color:var(--text-dim); }
   .zoom-live-btn:hover { background:var(--border); }
 
+  /* ── Stale-version banner ────────────────────────────────── */
+  #stale-banner {
+    display: none;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+    background: var(--yellow); color: var(--bg);
+    text-align: center; padding: 8px 16px; font-size: 0.88rem; font-weight: 500;
+    cursor: pointer;
+  }
+  #stale-banner:hover { opacity: 0.9; }
+
   /* ── iperf3 trigger button ───────────────────────────── */
   .btn-run { color: var(--green); }
   .btn-run.running { color: var(--yellow); animation: spin 1s linear infinite; }
@@ -202,6 +212,8 @@
 </head>
 <body>
 
+<div id="stale-banner" onclick="location.reload()"></div>
+
 <div class="page-header">
   <div class="page-header-left">
     <h1>pinger</h1>
@@ -209,6 +221,7 @@
       <span class="dot {{ 'on' if running else 'off' }}"></span>
       Probes {{ "running" if running else "stopped" }}
       · <span id="clock"></span>
+      · <span id="app-version" style="color:var(--text-dim);font-size:0.78rem">…</span>
     </p>
   </div>
   <div>
@@ -446,6 +459,32 @@ function tick() {
 }
 tick(); setInterval(tick, 1000);
 
+// ── Version check ─────────────────────────────────────────────────────────────
+let _currentVersion = null;
+function checkVersion() {
+  fetch('/api/version')
+    .then(r => r.json())
+    .then(d => {
+      const v = d.version || 'dev';
+      if (_currentVersion === null) {
+        // First load: record version and display it
+        _currentVersion = v;
+        const el = document.getElementById('app-version');
+        if (el) el.textContent = 'v ' + v;
+      } else if (v !== _currentVersion) {
+        // Server was redeployed mid-session
+        const banner = document.getElementById('stale-banner');
+        if (banner) {
+          banner.textContent = '⚠ New version deployed (' + v + '). Click to reload.';
+          banner.style.display = 'block';
+        }
+      }
+    })
+    .catch(() => {});
+}
+checkVersion();
+setInterval(checkVersion, 30_000);
+
 // ── Inline edit toggle ────────────────────────────────────────────────────────
 function toggleEdit(idx) {
   event.stopPropagation();
@@ -605,6 +644,20 @@ function fmtMs(v) { return fmtDur(v); }
 Chart.Tooltip.positioners.cursor = function(_elements, eventPosition) {
   return { x: eventPosition.x, y: eventPosition.y };
 };
+
+// Global plugin: suppress tooltip when the hovered x position has no real data
+// (prevents the tooltip from showing in gaps or empty regions of the chart)
+Chart.register({
+  id: 'tooltipNearDataOnly',
+  beforeTooltipDraw(chart, args) {
+    const tp = args.tooltip;
+    if (!tp || !tp.dataPoints) return;
+    const hasValid = tp.dataPoints.some(
+      p => p.parsed.y != null && p.dataset.label !== 'TCP RTT failed'
+    );
+    if (!hasValid) args.cancel = true;
+  }
+});
 
 function renderChart(name, tab, data, winStart, winEnd) {
   const CH = { bg: '#0d1117', surface: '#161b22', border: '#30363d',

@@ -14,6 +14,7 @@ Background probe threads start automatically on launch.
 from __future__ import annotations
 
 import argparse
+import os
 import threading
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
@@ -137,6 +138,19 @@ def trigger_iperf3(idx: int):
         target=engine._probe_iperf3, args=(h,), daemon=True, name=f"iperf3-manual-{idx}"
     ).start()
     return jsonify(ok=True)
+
+
+# ── Version API ───────────────────────────────────────────────────
+
+@app.route("/api/version")
+def api_version():
+    ver_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt")
+    try:
+        with open(ver_file) as f:
+            version = f.read().strip()
+    except FileNotFoundError:
+        version = "dev"
+    return jsonify({"version": version})
 
 
 # ── History API ───────────────────────────────────────────────────
