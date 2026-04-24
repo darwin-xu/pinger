@@ -13,10 +13,9 @@ TARGET="${1:-root@ubuntu-1.local}"
 REMOTE_DIR="./pinger"
 
 # Stamp the build: prefer git short hash, fall back to timestamp
-VERSION=$(git rev-parse --short HEAD 2>/dev/null || date -u +%Y%m%dT%H%M%SZ)
+VERSION=$(python3 -c "from checksum import compute_repo_checksum; print(compute_repo_checksum()[:8])" 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || date -u +%Y%m%dT%H%M%SZ)
 DEPLOYED_AT=$(date +"%Y-%m-%d %H:%M:%S %Z")
-echo "${VERSION} (deployed ${DEPLOYED_AT})" > version.txt
-echo "==> Version: $(cat version.txt)"
+echo "==> Version (repo checksum): ${VERSION} (deployed ${DEPLOYED_AT})"
 
 echo "==> Syncing files to ${TARGET}:${REMOTE_DIR}"
 rsync -av \
