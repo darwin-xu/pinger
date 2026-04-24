@@ -14,7 +14,7 @@ REMOTE_DIR="./pinger"
 
 # Stamp the build: prefer git short hash, fall back to timestamp
 VERSION=$(git rev-parse --short HEAD 2>/dev/null || date -u +%Y%m%dT%H%M%SZ)
-DEPLOYED_AT=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+DEPLOYED_AT=$(date +"%Y-%m-%d %H:%M:%S %Z")
 echo "${VERSION} (deployed ${DEPLOYED_AT})" > version.txt
 echo "==> Version: $(cat version.txt)"
 
@@ -22,6 +22,7 @@ echo "==> Syncing files to ${TARGET}:${REMOTE_DIR}"
 rsync -av \
   --no-perms --no-owner --no-group \
   --exclude '.venv' \
+  --exclude 'venv' \
   --exclude '__pycache__' \
   --exclude '*.pyc' \
   --exclude '.git' \
@@ -36,23 +37,41 @@ ssh "${TARGET}" bash <<'REMOTE'
 set -e
 cd ./pinger
 
-# Create venv if it doesn't exist yet
-if [ ! -f venv/bin/activate ]; then
+# Ensure a usable venv exists (recreate if missing or broken)
+if [ ! -x venv/bin/python ]; then
   echo "  --> Creating virtual environment"
-  python3 -m venv venv
-  python3 -m ensurepip --upgrade 2>/dev/null || true
+  rm -rf venv
+  if python3 -m venv venv 2>/dev/null; then
+    echo "  --> venv created"
+  else
+    echo "  --> venv creation failed; attempting to install python3-venv and retry"
+    if [ "$(id -u)" -ne 0 ]; then SUDO='sudo'; else SUDO=''; fi
+    $SUDO apt-get update -y
+    $SUDO apt-get install -y python3-venv
+    python3 -m venv venv
+    echo "  --> venv created after installing python3-venv"
+  fi
 fi
 
-source venv/bin/activate
+# Ensure pip is available in venv; avoid hanging network bootstrap fallback
+if ! venv/bin/python -m pip --version >/dev/null 2>&1; then
+  echo "  --> pip missing in venv; trying ensurepip"
+  venv/bin/python -m ensurepip --upgrade >/dev/null 2>&1 || true
+fi
+if ! venv/bin/python -m pip --version >/dev/null 2>&1; then
+  echo "  --> pip still unavailable in venv; please install python3-venv and rerun"
+  exit 1
+fi
 
-echo "  --> Installing/updating dependencies"
-python3 -m pip install -q -r requirements.txt
+echo "  --> Installing/updating dependencies in venv"
+venv/bin/python -m pip install --upgrade pip setuptools >/dev/null
+venv/bin/python -m pip install -q -r requirements.txt
 
 echo "  --> Stopping any previous instance"
 pkill -f "python app.py" || true
 
-echo "  --> Starting app"
-nohup python3 app.py --host 0.0.0.0 > pinger.log 2>&1 &
+echo "  --> Starting app with venv python"
+nohup venv/bin/python app.py --host 0.0.0.0 > pinger.log 2>&1 &
 echo "  --> Started (PID $!), log: ~/pinger/pinger.log"
 REMOTE
 

@@ -647,10 +647,70 @@ Chart.register({
   beforeTooltipDraw(chart, args) {
     const tp = args.tooltip;
     if (!tp || !tp.dataPoints) return;
-    const hasValid = tp.dataPoints.some(
-      p => p.parsed.y != null && p.dataset.label !== 'TCP RTT failed'
-    );
+    const hasValid = tp.dataPoints.some(p => p.parsed.y != null);
     if (!hasValid) args.cancel = true;
+  }
+});
+
+// Plugin: draw TCP RTT failure crosses on the TCP RTT line.
+// Uses the chart's x/y scales to position each cross, with linear RTT interpolation
+// between the two surrounding successful data points.
+// NOTE: uses afterDatasetsDraw so crosses appear beneath the tooltip overlay.
+Chart.register({
+  id: 'tcpFailMarkers',
+  afterDatasetsDraw(chart) {
+    if (chart.canvas.id !== 'history-chart-latency') return;
+    if (!_tcpFailed || !_tcpFailed.length) return;
+    const tcpDsIdx = chart.data.datasets.findIndex(ds => ds.label === 'TCP RTT (ms)');
+    if (tcpDsIdx < 0) return;
+    if (!chart.isDatasetVisible(tcpDsIdx)) return;
+
+    // Collect successful TCP RTT points in ascending time order
+    const rawData = chart.data.datasets[tcpDsIdx].data;
+    const okPts = [];
+    for (const pt of rawData) {
+      if (pt.y != null && isFinite(pt.y))
+        okPts.push({ t: new Date(pt.x).getTime(), rtt: pt.y });
+    }
+    if (!okPts.length) return;
+
+    const xScale = chart.scales.x, yScale = chart.scales.y;
+    if (!xScale || !yScale) return;
+    const { left, right, top, bottom } = chart.chartArea;
+    const ctx = chart.ctx;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, top, right - left, bottom - top);
+    ctx.clip();
+    ctx.strokeStyle = '#f85149';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+
+    for (const failed of _tcpFailed) {
+      const tf = new Date(_ts(failed)).getTime();
+      const cx = xScale.getPixelForValue(tf);
+      if (!isFinite(cx) || cx < left || cx > right) continue;
+
+      // Linearly interpolate RTT at tf between the two surrounding success points
+      const idx = okPts.findIndex(p => p.t >= tf);
+      let rttY;
+      if      (idx < 0)  rttY = okPts[okPts.length - 1].rtt;
+      else if (idx === 0) rttY = okPts[0].rtt;
+      else {
+        const p0 = okPts[idx - 1], p1 = okPts[idx];
+        rttY = p0.rtt + (p1.rtt - p0.rtt) * (tf - p0.t) / (p1.t - p0.t);
+      }
+      const cy = yScale.getPixelForValue(rttY);
+      if (!isFinite(cy) || cy < top || cy > bottom) continue;
+
+      const r = 6;
+      ctx.beginPath();
+      ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx + r, cy + r);
+      ctx.moveTo(cx + r, cy - r); ctx.lineTo(cx - r, cy + r);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 });
 
@@ -683,24 +743,10 @@ function renderChart(name, tab, data, winStart, winEnd) {
     });
     _tcpFailed = tcpFailed;
     _tcpFailedThreshold = aggregated ? (winEnd - winStart) / 200 : 20_000;
-    // Average RTT from successful probes in the window — used as Y position for failure markers
-    const tcpSuccessInWindow = [...data.tcp].reverse().filter(r => {
-      const t = new Date(_ts(r)).getTime();
-      return t >= winStart && t <= winEnd && r.success !== false && r.rtt != null;
-    });
-    const avgRtt = tcpSuccessInWindow.length
-      ? tcpSuccessInWindow.reduce((s, r) => s + r.rtt, 0) / tcpSuccessInWindow.length
-      : 0;
     datasets = [
       { label: 'Ping avg (ms)', data: ping.map(r => ({ x: _ts(r), y: r.success ? r.avg    : null })), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)',  pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
       { label: 'Jitter (ms)',   data: ping.map(r => ({ x: _ts(r), y: r.success ? r.jitter : null })), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
       { label: 'TCP RTT (ms)',  data: tcp.map( r => ({ x: _ts(r), y: r.success ? r.rtt    : null })), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
-      { label: 'TCP RTT failed', type: 'scatter',
-        data: tcpFailed.map(r => ({ x: _ts(r), y: avgRtt })),
-        pointStyle: 'crossRot', pointRadius: 5, pointHoverRadius: 6, pointBorderWidth: 2,
-        pointBorderColor: CH.red, pointBackgroundColor: 'transparent',
-        borderColor: 'transparent', backgroundColor: 'transparent',
-        showLine: false, yAxisID: 'y' },
     ];
     yScales = { y: { min: 0, title: { display: true, text: 'latency', color: CH.dim }, ticks: { color: CH.dim, callback: v => fmtMs(v) }, grid: { color: CH.border } } };
 
@@ -756,26 +802,14 @@ function renderChart(name, tab, data, winStart, winEnd) {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { labels: { color: CH.text, boxWidth: 12, padding: 16,
-          // Hide TCP RTT failure markers from the legend — they appear on the TCP RTT line
-          filter: item => item.text !== 'TCP RTT failed' } },
+        legend: { labels: { color: CH.text, boxWidth: 12, padding: 16 } },
         tooltip: {
           enabled: true,
           position: 'cursor',
           backgroundColor: CH.surface, borderColor: CH.border, borderWidth: 1,
           titleColor: CH.text, bodyColor: CH.dim,
-          // Exclude the failure scatter from the pooled index tooltip
-          filter: item => item.dataset.label !== 'TCP RTT failed',
           callbacks: tab === 'latency' ? {
             label: ctx => ctx.dataset.label.split(' (')[0] + ': ' + fmtMs(ctx.parsed.y),
-            afterBody: items => {
-              if (!items.length || !_tcpFailed.length) return;
-              const hx = items[0].parsed.x;
-              const hit = _tcpFailed.some(
-                r => Math.abs(new Date(_ts(r)).getTime() - hx) < _tcpFailedThreshold
-              );
-              return hit ? ['✗ TCP RTT: failed'] : [];
-            },
           } : {},
         },
       },
