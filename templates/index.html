@@ -601,6 +601,11 @@ function fmtDur(ms) {
 // Legacy alias used by chart tooltip
 function fmtMs(v) { return fmtDur(v); }
 
+// Custom tooltip positioner: anchors tooltip to cursor position to prevent drift
+Chart.Tooltip.positioners.cursor = function(_elements, eventPosition) {
+  return { x: eventPosition.x, y: eventPosition.y };
+};
+
 function renderChart(name, tab, data, winStart, winEnd) {
   const CH = { bg: '#0d1117', surface: '#161b22', border: '#30363d',
                 text: '#c9d1d9', dim: '#8b949e', green: '#3fb950',
@@ -630,12 +635,20 @@ function renderChart(name, tab, data, winStart, winEnd) {
     });
     _tcpFailed = tcpFailed;
     _tcpFailedThreshold = aggregated ? (winEnd - winStart) / 200 : 20_000;
+    // Average RTT from successful probes in the window — used as Y position for failure markers
+    const tcpSuccessInWindow = [...data.tcp].reverse().filter(r => {
+      const t = new Date(_ts(r)).getTime();
+      return t >= winStart && t <= winEnd && r.success !== false && r.rtt != null;
+    });
+    const avgRtt = tcpSuccessInWindow.length
+      ? tcpSuccessInWindow.reduce((s, r) => s + r.rtt, 0) / tcpSuccessInWindow.length
+      : 0;
     datasets = [
       { label: 'Ping avg (ms)', data: ping.map(r => ({ x: _ts(r), y: r.success ? r.avg    : null })), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)',  pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
       { label: 'Jitter (ms)',   data: ping.map(r => ({ x: _ts(r), y: r.success ? r.jitter : null })), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
       { label: 'TCP RTT (ms)',  data: tcp.map( r => ({ x: _ts(r), y: r.success ? r.rtt    : null })), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
       { label: 'TCP RTT failed', type: 'scatter',
-        data: tcpFailed.map(r => ({ x: _ts(r), y: 0 })),
+        data: tcpFailed.map(r => ({ x: _ts(r), y: avgRtt })),
         pointStyle: 'crossRot', pointRadius: 5, pointHoverRadius: 6, pointBorderWidth: 2,
         pointBorderColor: CH.red, pointBackgroundColor: 'transparent',
         borderColor: 'transparent', backgroundColor: 'transparent',
@@ -670,6 +683,12 @@ function renderChart(name, tab, data, winStart, winEnd) {
 
   // Same host+tab already displayed — update in place without animation
   if (_charts[tab] && _chartHost === name) {
+    // Preserve legend toggle state across data reloads
+    const hiddenByLabel = {};
+    _charts[tab].data.datasets.forEach((ds, i) => {
+      hiddenByLabel[ds.label] = !_charts[tab].isDatasetVisible(i);
+    });
+    datasets.forEach(ds => { if (hiddenByLabel[ds.label]) ds.hidden = true; });
     _charts[tab].data.datasets = datasets;
     _charts[tab].options.scales.x.min = winStart;
     _charts[tab].options.scales.x.max = winEnd;
@@ -689,9 +708,12 @@ function renderChart(name, tab, data, winStart, winEnd) {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { labels: { color: CH.text, boxWidth: 12, padding: 16 } },
+        legend: { labels: { color: CH.text, boxWidth: 12, padding: 16,
+          // Hide TCP RTT failure markers from the legend — they appear on the TCP RTT line
+          filter: item => item.text !== 'TCP RTT failed' } },
         tooltip: {
           enabled: true,
+          position: 'cursor',
           backgroundColor: CH.surface, borderColor: CH.border, borderWidth: 1,
           titleColor: CH.text, bodyColor: CH.dim,
           // Exclude the failure scatter from the pooled index tooltip
