@@ -220,7 +220,6 @@
     <p class="subtitle">
       <span class="dot {{ 'on' if running else 'off' }}"></span>
       Probes {{ "running" if running else "stopped" }}
-      · <span id="clock"></span>
       · <span id="app-version" style="color:var(--text-dim);font-size:0.78rem">…</span>
     </p>
   </div>
@@ -453,11 +452,7 @@ function tickCeil(ms, zl) {
   return f + zl.tickMs;
 }
 
-// ── Clock ─────────────────────────────────────────────────────────────────────
-function tick() {
-  document.getElementById('clock').textContent = new Date().toLocaleTimeString();
-}
-tick(); setInterval(tick, 1000);
+// (clock removed)
 
 // ── Version check ─────────────────────────────────────────────────────────────
 let _currentVersion = null;
