@@ -719,7 +719,7 @@ Chart.register({
       const cy = yScale.getPixelForValue(rttY);
       if (!isFinite(cy) || cy < top || cy > bottom) continue;
 
-      const r = 4;
+      const r = 2;
       ctx.beginPath();
       ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx + r, cy + r);
       ctx.moveTo(cx + r, cy - r); ctx.lineTo(cx - r, cy + r);
