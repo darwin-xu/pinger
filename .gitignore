@@ -35,7 +35,7 @@ config.yaml
 
 # SQLite database
 *.db
-pinger.db
+pinger.db*
 
 # IDE
 .vscode/
