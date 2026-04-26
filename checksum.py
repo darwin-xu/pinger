@@ -32,7 +32,7 @@ EXCLUDE_PATTERNS = (
     "node_modules",
     ".pytest_cache",
     "deploy.sh",
-    "test_formatting.py",
+    "test_*.py",
 )
 
 

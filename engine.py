@@ -148,6 +148,12 @@ class ProbeEngine:
     def snapshot(self) -> tuple[dict, dict]:
         """Return (results_copy, history_copy) under lock."""
         with self._lock:
-            snap_r = {k: dict(v) for k, v in self.results.items()}
+            snap_r = {
+                host: {
+                    probe: dict(data) if isinstance(data, dict) else data
+                    for probe, data in probes.items()
+                }
+                for host, probes in self.results.items()
+            }
             snap_h = {k: list(v) for k, v in self.history.items()}
         return snap_r, snap_h

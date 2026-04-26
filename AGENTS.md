@@ -18,7 +18,7 @@ This file helps AI coding agents work effectively in this repository.
   - pip install -r requirements.txt
 - Run web UI: .venv/bin/python app.py
 - Run CLI mode: .venv/bin/python main.py --config config.yaml
-- Run tests: pytest test_formatting.py
+- Run tests: python3 -m unittest discover
 
 ## Architecture and Boundaries
 
@@ -43,7 +43,7 @@ This file helps AI coding agents work effectively in this repository.
 
 ## Validation Checklist for Code Changes
 
-- Run relevant tests (at least pytest test_formatting.py when touching formatting).
+- Run relevant tests (at least python3 -m unittest discover when touching shared behavior).
 - If runtime behavior changed, run the affected entry point locally:
   - Web flow: app.py + dashboard/API sanity check.
   - CLI flow: main.py rendering and clean Ctrl-C shutdown.

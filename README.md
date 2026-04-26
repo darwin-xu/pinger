@@ -147,7 +147,7 @@ Scroll down to the **Settings** section on the web page to change probe interval
 python3 checksum.py --files-only
 ```
 
-Local runtime state such as `config.yaml`, `pinger.db`, virtual environments, logs, and caches is not part of the include list. Deployment helper files such as `deploy.sh`, `checksum.py`, and `test_formatting.py` are also excluded from remote sync.
+Local runtime state such as `config.yaml`, `pinger.db`, virtual environments, logs, and caches is not part of the include list. Deployment helper files such as `deploy.sh` and `checksum.py`, plus `test_*.py` files, are also excluded from remote sync.
 
 ---
 
@@ -160,6 +160,14 @@ For a terminal-only Rich dashboard (no web server):
 ```
 
 Press `Ctrl-C` to quit.
+
+---
+
+## Tests
+
+```bash
+python3 -m unittest discover
+```
 
 ---
 
@@ -228,6 +236,7 @@ sqlite3 pinger.db "SELECT ts, data FROM metrics WHERE host='Tokyo-1' AND probe='
 ```
 
 The history charts use `probe_interval` to identify missing probe windows. When adjacent samples are separated by more than two probe intervals, the connecting segment is drawn thinner and lighter so downtime or dashboard gaps are not mistaken for normal measurements. The TCP RTT failures legend shows the number of failed TCP probes in the current chart window and toggles the failure markers.
+On the 12h chart scale, x-axis labels include the date. On the 1mo scale, chart ticks align to the 1st of each month and the live range ends at the current time instead of a future month boundary.
 
 ---
 

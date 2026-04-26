@@ -455,6 +455,20 @@ function tickCeil(ms, zl) {
   return f + zl.tickMs;
 }
 
+function addMonths(ms, months) {
+  const d = new Date(ms);
+  const targetMonthStart = new Date(d.getFullYear(), d.getMonth() + months, 1);
+  const lastDay = new Date(targetMonthStart.getFullYear(), targetMonthStart.getMonth() + 1, 0).getDate();
+  return new Date(targetMonthStart.getFullYear(), targetMonthStart.getMonth(), Math.min(d.getDate(), lastDay),
+                  d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()).getTime();
+}
+
+function monthWindowForEnd(endMs) {
+  const end = new Date(endMs);
+  const start = new Date(end.getFullYear(), end.getMonth() - 9, 1);
+  return { winStart: start.getTime(), winEnd: endMs };
+}
+
 // (clock removed)
 
 // ── Version check ─────────────────────────────────────────────────────────────
@@ -584,9 +598,18 @@ function zoomIn()  { if (_zoomIdx > 0)                    { _zoomIdx--; _applyZo
 function zoomOut() { if (_zoomIdx < ZOOM_LEVELS.length-1) { _zoomIdx++; _applyZoom(); } }
 function setZoomLevel(i) { _zoomIdx = i; _applyZoom(); }
 function setLive()   { _windowEnd = null; _applyZoom(); }
-function panLeft()   { _windowEnd = (_windowEnd || Date.now()) - ZOOM_LEVELS[_zoomIdx].windowMs; _applyZoom(); }
+function panLeft()   {
+  const zl = ZOOM_LEVELS[_zoomIdx];
+  _windowEnd = zl.tickUnit === 'month'
+    ? addMonths(_windowEnd || Date.now(), -10)
+    : (_windowEnd || Date.now()) - zl.windowMs;
+  _applyZoom();
+}
 function panRight()  {
-  const end = (_windowEnd || Date.now()) + ZOOM_LEVELS[_zoomIdx].windowMs;
+  const zl = ZOOM_LEVELS[_zoomIdx];
+  const end = zl.tickUnit === 'month'
+    ? addMonths(_windowEnd || Date.now(), 10)
+    : (_windowEnd || Date.now()) + zl.windowMs;
   _windowEnd = end >= Date.now() - 5000 ? null : end;
   _applyZoom();
 }
@@ -594,13 +617,13 @@ function _applyZoom() { if (_selectedHost) fetchAndRender(_selectedHost); }
 
 function fetchAndRender(name) {
   const zl     = ZOOM_LEVELS[_zoomIdx];
-  // Align winEnd UP to the next tick boundary so window = exactly 10 ticks
-  const winEnd = tickCeil(_windowEnd || Date.now(), zl);
-  const winStart = zl.tickUnit === 'month'
-    ? (() => { const d = new Date(winEnd); return new Date(d.getFullYear(), d.getMonth() - 10, 1).getTime(); })()
-    : winEnd - zl.windowMs;
+  const liveEnd = _windowEnd || Date.now();
+  // Month scale uses calendar months: ticks start on the 1st, range ends at the selected/live time.
+  const { winStart, winEnd } = zl.tickUnit === 'month'
+    ? monthWindowForEnd(liveEnd)
+    : { winStart: tickCeil(liveEnd, zl) - zl.windowMs, winEnd: tickCeil(liveEnd, zl) };
   // Request rows covering the window; cap at 50k to protect the server
-  const limit    = Math.min(Math.ceil(zl.windowMs / Math.max(PROBE_INTERVAL_MS, 1000)) + 200, 50000);
+  const limit    = Math.min(Math.ceil((winEnd - winStart) / Math.max(PROBE_INTERVAL_MS, 1000)) + 200, 50000);
   const since    = new Date(winStart).toISOString().slice(0, 19); // naive UTC prefix
   fetch('/api/history/' + encodeURIComponent(name) +
         '?since=' + encodeURIComponent(since) + '&limit=' + limit)
@@ -626,6 +649,30 @@ function updateZoomControls(winStart, winEnd) {
   };
   const el = document.getElementById('chart-range-label');
   if (el) el.textContent = fmtDate(winStart) + ' \u2013 ' + fmtDate(winEnd);
+}
+
+function xAxisDisplayFormats(zl) {
+  return {
+    minute: 'HH:mm',
+    hour: zl.label === '12h' ? 'MMM d HH:mm' : 'HH:mm',
+    day: 'MMM d',
+    month: 'MMM yyyy',
+  };
+}
+
+function xAxisTickCallback(zl) {
+  if (zl.label !== '12h') return undefined;
+  return value => {
+    const d = new Date(value);
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  };
+}
+
+function xAxisTicks(zl, color) {
+  const ticks = { color, stepSize: zl.stepSize };
+  const callback = xAxisTickCallback(zl);
+  if (callback) ticks.callback = callback;
+  return ticks;
 }
 
 function fmtNum(v) {
@@ -885,7 +932,8 @@ function renderChart(name, tab, data, winStart, winEnd) {
     _charts[tab].options.scales.x.min = winStart;
     _charts[tab].options.scales.x.max = winEnd;
     _charts[tab].options.scales.x.time.unit = zl.tickUnit;
-    _charts[tab].options.scales.x.ticks.stepSize = zl.stepSize;
+    _charts[tab].options.scales.x.time.displayFormats = xAxisDisplayFormats(zl);
+    _charts[tab].options.scales.x.ticks = xAxisTicks(zl, CH.dim);
     _charts[tab].options.plugins.tooltip.enabled = true;
     _charts[tab].update('none');
     return;
@@ -950,10 +998,10 @@ function renderChart(name, tab, data, winStart, winEnd) {
           max: winEnd,
           time: {
             unit: zl.tickUnit,
-            displayFormats: { minute: 'HH:mm', hour: 'HH:mm', day: 'MMM d', month: 'MMM yy' },
+            displayFormats: xAxisDisplayFormats(zl),
             tooltipFormat: 'MMM d HH:mm:ss',
           },
-          ticks: { color: CH.dim, stepSize: zl.stepSize },
+          ticks: xAxisTicks(zl, CH.dim),
           grid:  { color: CH.border },
         },
         ...yScales,

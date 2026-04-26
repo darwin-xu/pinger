@@ -1,11 +1,13 @@
-"""Tests for formatting.fmt_duration."""
-import pytest
+"""Tests for formatting.fmt_duration and template chart regressions."""
+from pathlib import Path
+import unittest
+
 from formatting import fmt_duration, _fmt_num
 
 
 # ── _fmt_num ──────────────────────────────────────────────────────────────────
 
-class TestFmtNum:
+class TestFmtNum(unittest.TestCase):
     def test_integer(self):
         assert _fmt_num(1.0) == "1"
 
@@ -31,7 +33,7 @@ class TestFmtNum:
 
 # ── fmt_duration — sub-second ─────────────────────────────────────────────────
 
-class TestSubSecond:
+class TestSubSecond(unittest.TestCase):
     def test_nanoseconds(self):
         # 0.000001 ms = 1 ns
         assert fmt_duration(0.000001) == "1 ns"
@@ -82,7 +84,7 @@ class TestSubSecond:
 
 # ── fmt_duration — longer durations ──────────────────────────────────────────
 
-class TestLongerDurations:
+class TestLongerDurations(unittest.TestCase):
     def test_hms_example_1(self):
         # 3 min 42 s = 222 s = 222,000 ms
         assert fmt_duration(222_000) == "00:03:42"
@@ -121,7 +123,7 @@ class TestLongerDurations:
 
 # ── fmt_duration — edge cases ─────────────────────────────────────────────────
 
-class TestEdgeCases:
+class TestEdgeCases(unittest.TestCase):
     def test_none_returns_dash(self):
         assert fmt_duration(None) == "—"
 
@@ -133,3 +135,28 @@ class TestEdgeCases:
 
     def test_exactly_1s(self):
         assert fmt_duration(1_000) == "1 s"
+
+
+# ── History chart template regressions ────────────────────────────────────────
+
+class TestHistoryChartTemplate(unittest.TestCase):
+    @staticmethod
+    def _template_source():
+        return (Path(__file__).parent / "templates" / "index.html").read_text()
+
+    def test_12h_axis_has_date_format(self):
+        src = self._template_source()
+        assert "hour: zl.label === '12h' ? 'MMM d HH:mm' : 'HH:mm'" in src
+        assert "month: 'short', day: 'numeric'" in src
+
+    def test_non_12h_axes_do_not_install_custom_tick_callback(self):
+        src = self._template_source()
+        assert "function xAxisTicks(zl, color)" in src
+        assert "if (callback) ticks.callback = callback;" in src
+        assert "callback: xAxisTickCallback(zl)" not in src
+        assert ".ticks.callback = xAxisTickCallback(zl)" not in src
+
+    def test_zoom_update_replaces_entire_x_axis_ticks_config(self):
+        src = self._template_source()
+        assert "_charts[tab].options.scales.x.ticks = xAxisTicks(zl, CH.dim);" in src
+        assert "ticks: xAxisTicks(zl, CH.dim)" in src
