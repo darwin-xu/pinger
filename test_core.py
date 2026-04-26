@@ -42,6 +42,7 @@ class TestChecksumFileSelection(unittest.TestCase):
             files,
             [
                 "app.py",
+                "checksum.py",
                 "probes/tcp.py",
                 "requirements.txt",
                 "templates/index.html",
@@ -52,9 +53,9 @@ class TestChecksumFileSelection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "app.py").write_text("print('one')\n")
-            (root / "checksum.py").write_text("ignored one\n")
+            (root / "test_core.py").write_text("ignored one\n")
             first = checksum.compute_repo_checksum(root)
-            (root / "checksum.py").write_text("ignored two\n")
+            (root / "test_core.py").write_text("ignored two\n")
             self.assertEqual(checksum.compute_repo_checksum(root), first)
             (root / "app.py").write_text("print('two')\n")
             self.assertNotEqual(checksum.compute_repo_checksum(root), first)
