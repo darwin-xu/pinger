@@ -416,6 +416,9 @@ let _selectedHost = null;
 let _selectedIdx  = null;
 let _tcpFailed = [];          // raw failed TCP rows for current latency window
 let _tcpFailedThreshold = 20_000; // ms tolerance for tooltip match
+let _tcpFailuresWanted = true;
+const PROBE_INTERVAL_MS = {{ (settings.probe_interval | default(30)) * 1000 }};
+const GAP_THRESHOLD_MS = PROBE_INTERVAL_MS * 2;
 
 function escAttr(s) {
   return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -529,12 +532,15 @@ function aggregateSeries(rows, winStart, winEnd, buckets) {
   const bucketMs = (winEnd - winStart) / buckets;
   const agg = Array.from({ length: buckets }, (_, i) => ({
     t: winStart + (i + 0.5) * bucketMs, sums: {}, counts: {}, count: 0,
+    firstTs: null, lastTs: null,
   }));
   const FIELDS = ['avg','min','max','jitter','loss','p95','rtt','download_mbps','upload_mbps'];
   for (const row of rows) {
     const t = new Date(_ts(row)).getTime();
     if (t < winStart || t > winEnd) continue;
     const bi = Math.min(Math.floor((t - winStart) / bucketMs), buckets - 1);
+    if (agg[bi].firstTs == null || t < agg[bi].firstTs) agg[bi].firstTs = t;
+    if (agg[bi].lastTs  == null || t > agg[bi].lastTs)  agg[bi].lastTs  = t;
     for (const f of FIELDS) {
       if (row[f] != null) {
         agg[bi].sums[f]   = (agg[bi].sums[f]   || 0) + row[f];
@@ -544,7 +550,12 @@ function aggregateSeries(rows, winStart, winEnd, buckets) {
     agg[bi].count++;
   }
   return agg.filter(b => b.count > 0).map(b => {
-    const r = { ts: new Date(b.t).toISOString(), success: true };
+    const r = {
+      ts: new Date(b.t).toISOString(),
+      firstTs: new Date(b.firstTs).toISOString(),
+      lastTs: new Date(b.lastTs).toISOString(),
+      success: true,
+    };
     for (const [f, s] of Object.entries(b.sums)) r[f] = s / b.counts[f];
     return r;
   });
@@ -589,7 +600,7 @@ function fetchAndRender(name) {
     ? (() => { const d = new Date(winEnd); return new Date(d.getFullYear(), d.getMonth() - 10, 1).getTime(); })()
     : winEnd - zl.windowMs;
   // Request rows covering the window; cap at 50k to protect the server
-  const limit    = Math.min(Math.ceil(zl.windowMs / 4000) + 200, 50000);
+  const limit    = Math.min(Math.ceil(zl.windowMs / Math.max(PROBE_INTERVAL_MS, 1000)) + 200, 50000);
   const since    = new Date(winStart).toISOString().slice(0, 19); // naive UTC prefix
   fetch('/api/history/' + encodeURIComponent(name) +
         '?since=' + encodeURIComponent(since) + '&limit=' + limit)
@@ -650,6 +661,69 @@ function fmtDur(ms) {
 // Legacy alias used by chart tooltip
 function fmtMs(v) { return fmtDur(v); }
 
+function isLargeProbeGap(ctx) {
+  return !!(ctx.p1 && ctx.p1.raw && ctx.p1.raw.gapFromPrev);
+}
+
+function sampleStartMs(row) {
+  return new Date(row.firstTs || _ts(row)).getTime();
+}
+
+function sampleEndMs(row) {
+  return new Date(row.lastTs || _ts(row)).getTime();
+}
+
+function pointsWithGaps(rows, valueFn) {
+  let prevEnd = null;
+  return rows.map(row => {
+    const start = sampleStartMs(row);
+    const end = sampleEndMs(row);
+    const pt = {
+      x: _ts(row),
+      y: valueFn(row),
+      gapFromPrev: prevEnd != null && start - prevEnd > GAP_THRESHOLD_MS,
+    };
+    prevEnd = end;
+    return pt;
+  });
+}
+
+function lineDataset({ metricId, label, data, borderColor, backgroundColor, yAxisID = 'y', fill = false }) {
+  return {
+    metricId,
+    label,
+    data,
+    borderColor,
+    backgroundColor,
+    fill,
+    pointRadius: 0,
+    tension: 0.3,
+    spanGaps: true,
+    yAxisID,
+    segment: {
+      borderColor: ctx => isLargeProbeGap(ctx) ? 'rgba(139,148,158,0.45)' : borderColor,
+      borderWidth: ctx => isLargeProbeGap(ctx) ? 1 : 2,
+    },
+  };
+}
+
+function failureLegendDataset(count, winStart) {
+  return {
+    metricId: 'tcp-failures',
+    label: 'TCP RTT failures: ' + count,
+    data: [{ x: new Date(winStart).toISOString(), y: null }],
+    borderColor: '#f85149',
+    backgroundColor: 'rgba(0,0,0,0)',
+    pointRadius: 0,
+    hidden: !_tcpFailuresWanted,
+  };
+}
+
+function isMetricVisible(chart, metricId) {
+  const idx = chart.data.datasets.findIndex(ds => ds.metricId === metricId);
+  return idx >= 0 && chart.isDatasetVisible(idx);
+}
+
 // Custom tooltip positioner: anchors tooltip to cursor position to prevent drift
 Chart.Tooltip.positioners.cursor = function(_elements, eventPosition) {
   return { x: eventPosition.x, y: eventPosition.y };
@@ -676,9 +750,10 @@ Chart.register({
   afterDatasetsDraw(chart) {
     if (chart.canvas.id !== 'history-chart-latency') return;
     if (!_tcpFailed || !_tcpFailed.length) return;
-    const tcpDsIdx = chart.data.datasets.findIndex(ds => ds.label === 'TCP RTT (ms)');
+    const tcpDsIdx = chart.data.datasets.findIndex(ds => ds.metricId === 'tcp-rtt');
     if (tcpDsIdx < 0) return;
     if (!chart.isDatasetVisible(tcpDsIdx)) return;
+    if (!_tcpFailuresWanted || !isMetricVisible(chart, 'tcp-failures')) return;
 
     // Collect successful TCP RTT points in ascending time order
     const rawData = chart.data.datasets[tcpDsIdx].data;
@@ -759,9 +834,10 @@ function renderChart(name, tab, data, winStart, winEnd) {
     _tcpFailed = tcpFailed;
     _tcpFailedThreshold = aggregated ? (winEnd - winStart) / 200 : 20_000;
     datasets = [
-      { label: 'Ping avg (ms)', data: ping.map(r => ({ x: _ts(r), y: r.success ? r.avg    : null })), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)',  pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
-      { label: 'Jitter (ms)',   data: ping.map(r => ({ x: _ts(r), y: r.success ? r.jitter : null })), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
-      { label: 'TCP RTT (ms)',  data: tcp.map( r => ({ x: _ts(r), y: r.success ? r.rtt    : null })), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
+      lineDataset({ metricId: 'ping-avg', label: 'Ping avg (ms)', data: pointsWithGaps(ping, r => r.success ? r.avg    : null), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)' }),
+      lineDataset({ metricId: 'jitter',   label: 'Jitter (ms)',   data: pointsWithGaps(ping, r => r.success ? r.jitter : null), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)' }),
+      lineDataset({ metricId: 'tcp-rtt',  label: 'TCP RTT (ms)', data: pointsWithGaps(tcp,  r => r.success ? r.rtt    : null), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)' }),
+      failureLegendDataset(tcpFailed.length, winStart),
     ];
     yScales = { y: { min: 0, title: { display: true, text: 'latency', color: CH.dim }, ticks: { color: CH.dim, callback: v => fmtMs(v) }, grid: { color: CH.border } } };
 
@@ -773,15 +849,15 @@ function renderChart(name, tab, data, winStart, winEnd) {
       return;
     }
     datasets = [
-      { label: '\u2193 Download (Mbps)', data: rows.map(r => ({ x: _ts(r), y: r.success ? r.download_mbps : null })), borderColor: CH.green, backgroundColor: 'rgba(63,185,80,0.08)',  pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
-      { label: '\u2191 Upload (Mbps)',   data: rows.map(r => ({ x: _ts(r), y: r.success ? r.upload_mbps   : null })), borderColor: CH.cyan,  backgroundColor: 'rgba(88,166,255,0.08)', pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
+      lineDataset({ metricId: 'download', label: '\u2193 Download (Mbps)', data: pointsWithGaps(rows, r => r.success ? r.download_mbps : null), borderColor: CH.green, backgroundColor: 'rgba(63,185,80,0.08)' }),
+      lineDataset({ metricId: 'upload',   label: '\u2191 Upload (Mbps)',   data: pointsWithGaps(rows, r => r.success ? r.upload_mbps   : null), borderColor: CH.cyan,  backgroundColor: 'rgba(88,166,255,0.08)' }),
     ];
     yScales = { y: { title: { display: true, text: 'Mbps', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
 
   } else if (tab === 'loss') {
     const rows = prepRows(data.ping);
     datasets = [
-      { label: 'Loss (%)', data: rows.map(r => ({ x: _ts(r), y: r.loss ?? null })), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true, pointRadius: 0, tension: 0.3, spanGaps: true, yAxisID: 'y' },
+      lineDataset({ metricId: 'loss', label: 'Loss (%)', data: pointsWithGaps(rows, r => r.loss ?? null), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true }),
     ];
     yScales = { y: { min: 0, max: 100, title: { display: true, text: '%', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
   }
@@ -793,11 +869,18 @@ function renderChart(name, tab, data, winStart, winEnd) {
   // Same host+tab already displayed — update in place without animation
   if (_charts[tab] && _chartHost === name) {
     // Preserve legend toggle state across data reloads
-    const hiddenByLabel = {};
+    const hiddenByKey = {};
     _charts[tab].data.datasets.forEach((ds, i) => {
-      hiddenByLabel[ds.label] = !_charts[tab].isDatasetVisible(i);
+      hiddenByKey[ds.metricId || ds.label] = !_charts[tab].isDatasetVisible(i);
     });
-    datasets.forEach(ds => { if (hiddenByLabel[ds.label]) ds.hidden = true; });
+    if ('tcp-failures' in hiddenByKey && !hiddenByKey['tcp-rtt']) {
+      _tcpFailuresWanted = !hiddenByKey['tcp-failures'];
+    }
+    datasets.forEach(ds => { if (hiddenByKey[ds.metricId || ds.label]) ds.hidden = true; });
+    const tcpHidden = !!hiddenByKey['tcp-rtt'];
+    datasets.forEach(ds => {
+      if (ds.metricId === 'tcp-failures' && tcpHidden) ds.hidden = true;
+    });
     _charts[tab].data.datasets = datasets;
     _charts[tab].options.scales.x.min = winStart;
     _charts[tab].options.scales.x.max = winEnd;
@@ -817,14 +900,46 @@ function renderChart(name, tab, data, winStart, winEnd) {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { labels: { color: CH.text, boxWidth: 12, padding: 16 } },
+        legend: {
+          labels: { color: CH.text, boxWidth: 12, padding: 16 },
+          onClick: (_evt, legendItem, legend) => {
+            const chart = legend.chart;
+            const idx = legendItem.datasetIndex;
+            const ds = chart.data.datasets[idx];
+            if (!ds) return;
+
+            if (ds.metricId === 'tcp-rtt') {
+              const nextVisible = !chart.isDatasetVisible(idx);
+              chart.setDatasetVisibility(idx, nextVisible);
+              const failIdx = chart.data.datasets.findIndex(d => d.metricId === 'tcp-failures');
+              if (failIdx >= 0) {
+                chart.setDatasetVisibility(
+                  failIdx,
+                  nextVisible && _tcpFailuresWanted
+                );
+              }
+            } else if (ds.metricId === 'tcp-failures') {
+              const tcpVisible = isMetricVisible(chart, 'tcp-rtt');
+              if (tcpVisible) _tcpFailuresWanted = !chart.isDatasetVisible(idx);
+              chart.setDatasetVisibility(idx, tcpVisible && _tcpFailuresWanted);
+            } else {
+              chart.setDatasetVisibility(idx, !chart.isDatasetVisible(idx));
+            }
+            chart.update();
+          },
+        },
         tooltip: {
           enabled: true,
           position: 'cursor',
           backgroundColor: CH.surface, borderColor: CH.border, borderWidth: 1,
           titleColor: CH.text, bodyColor: CH.dim,
           callbacks: tab === 'latency' ? {
-            label: ctx => ctx.dataset.label.split(' (')[0] + ': ' + fmtMs(ctx.parsed.y),
+            label: ctx => {
+              const metric = ctx.dataset.metricId === 'tcp-rtt'
+                ? 'TCP RTT'
+                : ctx.dataset.label.split(' (')[0];
+              return metric + ': ' + fmtMs(ctx.parsed.y);
+            },
           } : {},
         },
       },

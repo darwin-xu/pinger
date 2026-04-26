@@ -211,6 +211,8 @@ Query history directly:
 sqlite3 pinger.db "SELECT ts, data FROM metrics WHERE host='Tokyo-1' AND probe='ping' ORDER BY ts DESC LIMIT 10;"
 ```
 
+The history charts use `probe_interval` to identify missing probe windows. When adjacent samples are separated by more than two probe intervals, the connecting segment is drawn thinner and lighter so downtime or dashboard gaps are not mistaken for normal measurements. The TCP RTT failures legend shows the number of failed TCP probes in the current chart window and toggles the failure markers.
+
 ---
 
 ## Troubleshooting
