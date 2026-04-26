@@ -17,7 +17,10 @@ import argparse
 import os
 import threading
 from datetime import datetime
-from checksum import compute_repo_checksum
+try:
+    from checksum import compute_repo_checksum
+except ImportError:
+    compute_repo_checksum = None
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 
@@ -150,9 +153,9 @@ def trigger_iperf3(idx: int):
 def api_version():
     # Return checksum (from repository files) and server start time.
     try:
-        checksum = compute_repo_checksum()
+        checksum = compute_repo_checksum() if compute_repo_checksum else os.environ.get("PINGER_CHECKSUM")
     except Exception:
-        checksum = None
+        checksum = os.environ.get("PINGER_CHECKSUM")
     return jsonify({"checksum": checksum, "server_start": server_start})
 
 

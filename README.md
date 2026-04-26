@@ -135,6 +135,22 @@ Scroll down to the **Settings** section on the web page to change probe interval
 
 ---
 
+## Deploy Web UI
+
+```bash
+./deploy.sh root@ubuntu-1.local
+```
+
+`deploy.sh` syncs the same deployable include list used by the runtime checksum. Inspect it with:
+
+```bash
+python3 checksum.py --files-only
+```
+
+Local runtime state such as `config.yaml`, `pinger.db`, virtual environments, logs, and caches is not part of the include list. Deployment helper files such as `deploy.sh`, `checksum.py`, and `test_formatting.py` are also excluded from remote sync.
+
+---
+
 ## CLI Mode (optional)
 
 For a terminal-only Rich dashboard (no web server):

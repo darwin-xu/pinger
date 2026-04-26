@@ -18,21 +18,13 @@ DEPLOYED_AT=$(date +"%Y-%m-%d %H:%M:%S %Z")
 echo "==> Version (repo checksum): ${VERSION} (deployed ${DEPLOYED_AT})"
 
 echo "==> Syncing files to ${TARGET}:${REMOTE_DIR}"
-rsync -av \
+python3 checksum.py --files-only | rsync -av \
   --no-perms --no-owner --no-group \
-  --exclude '.venv' \
-  --exclude 'venv' \
-  --exclude '__pycache__' \
-  --exclude '*.pyc' \
-  --exclude '.git' \
-  --exclude '.pytest_cache' \
-  --exclude 'pinger.db' \
-  --exclude 'pinger.db-shm' \
-  --exclude 'pinger.db-wal' \
+  --files-from=- \
   . "${TARGET}:${REMOTE_DIR}/"
 
 echo "==> Restarting app on ${TARGET}"
-ssh "${TARGET}" bash <<'REMOTE'
+ssh "${TARGET}" "PINGER_CHECKSUM='${VERSION}' bash" <<'REMOTE'
 set -e
 cd ./pinger
 

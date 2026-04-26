@@ -1,80 +1,85 @@
 #!/usr/bin/env python3
-"""Compute a deterministic SHA256 checksum for the repository and list hashed files.
+"""Compute a deterministic SHA256 checksum for deployable repository files.
 
 Usage:
   python3 checksum.py [--root PATH]
-
-By default excludes: .git, venv, .venv, __pycache__, node_modules, and .pytest_cache
+  python3 checksum.py --files-only
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import os
-import sys
 from pathlib import Path
 from typing import List
 import fnmatch
 import unicodedata
 
-# Patterns may include shell-style wildcards (eg. "*.db", "build/*", "venv")
-EXCLUDE_DIRS = {
+# Single source of truth for files that are deployed and checksummed.
+# Patterns are matched against normalized POSIX paths relative to the repo root.
+INCLUDE_FILE_PATTERNS = (
+    "**/*.py",
+    "**/*.sh",
+    "**/*.html",
+    "requirements.txt",
+)
+
+EXCLUDE_PATTERNS = (
     ".git",
     "venv",
     ".venv",
     "__pycache__",
     "node_modules",
     ".pytest_cache",
-    ".github",
-}
-EXCLUDE_FILES = {
-    ".gitignore",
-    "pinger.db*",
-    "*.md",
-    "config.yaml*",
-    "*.txt",
-    "*.log",
-}
-# Note: `version.txt` is no longer used and therefore not excluded.
+    "deploy.sh",
+    "test_formatting.py",
+)
 
 
-def _matches_any_pattern(path: Path, patterns: set, repo_root: Path) -> bool:
+def _matches_any_pattern(path: Path, patterns: tuple[str, ...], repo_root: Path) -> bool:
     """Return True if `path` matches any of the glob-style `patterns`.
 
     Matching is attempted against the file's relative path (with forward
-    slashes) and against each path segment so patterns like `venv` or
-    `__pycache__` match regardless of their depth.
+    slashes). Patterns without a slash only match top-level files.
     """
     rel = unicodedata.normalize("NFC", path.relative_to(repo_root).as_posix())
-    parts = rel.split("/")
+    rel_path = Path(rel)
     for pat in patterns:
         pat_n = unicodedata.normalize("NFC", pat)
-        if fnmatch.fnmatch(rel, pat_n):
+        root_pat = pat_n[3:] if pat_n.startswith("**/") else None
+        if (
+            fnmatch.fnmatch(rel, pat_n)
+            or rel_path.match(pat_n)
+            or (root_pat is not None and fnmatch.fnmatch(rel, root_pat))
+        ):
             return True
-        for part in parts:
-            if fnmatch.fnmatch(part, pat_n):
-                return True
+        if any(fnmatch.fnmatch(part, pat_n) for part in rel_path.parts):
+            return True
     return False
 
 
-def list_repo_files(root: str | os.PathLike | None = None) -> List[Path]:
+def list_included_files(root: str | os.PathLike | None = None) -> List[Path]:
+    """Return deployable files included in the checksum, sorted deterministically."""
     if root is None:
         root = os.path.dirname(os.path.abspath(__file__))
     p = Path(root)
-    files = [f for f in p.rglob("*") if f.is_file()]
+    files = [
+        f
+        for f in p.rglob("*")
+        if (
+            f.is_file()
+            and _matches_any_pattern(f, INCLUDE_FILE_PATTERNS, p)
+            and not _matches_any_pattern(f, EXCLUDE_PATTERNS, p)
+        )
+    ]
     # Sort by normalized POSIX relative path so ordering is consistent across
     # platforms (path separators and Unicode normalization).
     files.sort(key=lambda x: unicodedata.normalize("NFC", x.relative_to(p).as_posix()))
-    out: List[Path] = []
-    for f in files:
-        # Exclude by directory patterns (matches any path segment)
-        if _matches_any_pattern(f, EXCLUDE_DIRS, p):
-            continue
-        # Exclude by file patterns (matches relative path or filename)
-        if _matches_any_pattern(f, EXCLUDE_FILES, p):
-            continue
-        out.append(f)
-    return out
+    return files
+
+
+# Backward-compatible name used by callers that imported the previous helper.
+list_repo_files = list_included_files
 
 
 def compute_repo_checksum(root: str | os.PathLike | None = None) -> str:
@@ -128,6 +133,11 @@ def main(argv: List[str] | None = None) -> int:
         help="Do not print the file list, only checksum",
     )
     parser.add_argument(
+        "--files-only",
+        action="store_true",
+        help="Print included file paths only, one per line, for tools like rsync --files-from",
+    )
+    parser.add_argument(
         "--long",
         action="store_true",
         help="Print full 64-char SHA256 hashes instead of short 8-char (default)",
@@ -136,7 +146,12 @@ def main(argv: List[str] | None = None) -> int:
 
     root = args.root
     p = Path(root or os.path.dirname(os.path.abspath(__file__)))
-    files = list_repo_files(root)
+    files = list_included_files(root)
+
+    if args.files_only:
+        for f in files:
+            print(unicodedata.normalize("NFC", f.relative_to(p).as_posix()))
+        return 0
 
     checksum = compute_repo_checksum(root)
 
