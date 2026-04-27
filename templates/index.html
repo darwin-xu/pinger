@@ -625,8 +625,9 @@ function fetchAndRender(name) {
   // Request rows covering the window; cap at 50k to protect the server
   const limit    = Math.min(Math.ceil((winEnd - winStart) / Math.max(PROBE_INTERVAL_MS, 1000)) + 200, 50000);
   const since    = new Date(winStart).toISOString().slice(0, 19); // naive UTC prefix
+  const until    = new Date(winEnd).toISOString().slice(0, 19);   // naive UTC prefix
   fetch('/api/history/' + encodeURIComponent(name) +
-        '?since=' + encodeURIComponent(since) + '&limit=' + limit)
+        '?since=' + encodeURIComponent(since) + '&until=' + encodeURIComponent(until) + '&limit=' + limit)
     .then(r => r.json())
     .then(data => {
       ['latency', 'bandwidth', 'loss'].forEach(tab => renderChart(name, tab, data, winStart, winEnd));

@@ -166,8 +166,8 @@ class TestAppApi(unittest.TestCase):
     def test_history_resolves_display_name_to_host_ip(self):
         calls = []
 
-        def fake_recent(host, probe, limit=20, since=None):
-            calls.append((host, probe, limit, since))
+        def fake_recent(host, probe, limit=20, since=None, until=None):
+            calls.append((host, probe, limit, since, until))
             return [{"ts": "2026-01-01T00:00:00", "probe": probe}]
 
         with patch.object(app_module.storage, "recent", side_effect=fake_recent):
@@ -177,16 +177,16 @@ class TestAppApi(unittest.TestCase):
         self.assertEqual(
             calls,
             [
-                ("1.2.3.4", "ping", 7, "2026-01-01T00:00:00"),
-                ("1.2.3.4", "tcp", 7, "2026-01-01T00:00:00"),
-                ("1.2.3.4", "iperf3", 7, "2026-01-01T00:00:00"),
+                ("1.2.3.4", "ping", 7, "2026-01-01T00:00:00", None),
+                ("1.2.3.4", "tcp", 7, "2026-01-01T00:00:00", None),
+                ("1.2.3.4", "iperf3", 7, "2026-01-01T00:00:00", None),
             ],
         )
 
     def test_history_limit_is_capped(self):
         limits = []
 
-        def fake_recent(host, probe, limit=20, since=None):
+        def fake_recent(host, probe, limit=20, since=None, until=None):
             limits.append(limit)
             return []
 

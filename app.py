@@ -171,10 +171,11 @@ def api_history(host: str):
     )
     limit = min(request.args.get("limit", 1000, type=int), 50000)
     since = request.args.get("since") or None
+    until = request.args.get("until") or None
     return jsonify(
-        ping=storage.recent(host_ip, "ping", limit=limit, since=since),
-        tcp=storage.recent(host_ip, "tcp",  limit=limit, since=since),
-        iperf3=storage.recent(host_ip, "iperf3", limit=limit, since=since),
+        ping=storage.recent(host_ip, "ping", limit=limit, since=since, until=until),
+        tcp=storage.recent(host_ip, "tcp",  limit=limit, since=since, until=until),
+        iperf3=storage.recent(host_ip, "iperf3", limit=limit, since=since, until=until),
     )
 
 

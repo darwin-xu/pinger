@@ -61,20 +61,36 @@ def save(host: str, probe: str, data: dict) -> None:
         conn.commit()
 
 
-def recent(host: str, probe: str, limit: int = 20, since: str | None = None) -> list[dict]:
+def recent(host: str, probe: str, limit: int = 20,
+           since: str | None = None, until: str | None = None) -> list[dict]:
     """Return up to *limit* most recent rows for (host, probe), newest first.
 
     If *since* is given (naive UTC ISO prefix), only rows with ts >= since
-    are returned.  The string comparison works because timestamps are stored
+    are returned.  If *until* is given, only rows with ts <= until are
+    returned.  The string comparison works because timestamps are stored
     as ISO-8601 and sort lexicographically.
     """
     with _lock:
-        if since:
+        if since and until:
+            rows = _db().execute(
+                "SELECT ts, data FROM metrics "
+                "WHERE host=? AND probe=? AND ts >= ? AND ts <= ? "
+                "ORDER BY ts DESC LIMIT ?",
+                (host, probe, since, until, limit),
+            ).fetchall()
+        elif since:
             rows = _db().execute(
                 "SELECT ts, data FROM metrics "
                 "WHERE host=? AND probe=? AND ts >= ? "
                 "ORDER BY ts DESC LIMIT ?",
                 (host, probe, since, limit),
+            ).fetchall()
+        elif until:
+            rows = _db().execute(
+                "SELECT ts, data FROM metrics "
+                "WHERE host=? AND probe=? AND ts <= ? "
+                "ORDER BY ts DESC LIMIT ?",
+                (host, probe, until, limit),
             ).fetchall()
         else:
             rows = _db().execute(
