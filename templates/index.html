@@ -918,12 +918,12 @@ function renderChart(name, tab, data, winStart, winEnd) {
             lineDataset({ metricId: 'ping-avg', label: fmtLbl('Ping avg', pingAvg),   data: pointsWithGaps(ping, r => r.success ? r.avg    : null), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)' }),
             lineDataset({ metricId: 'jitter',   label: fmtLbl('Jitter avg', jitterAvg), data: pointsWithGaps(ping, r => r.success ? r.jitter : null), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)' }),
             lineDataset({ metricId: 'tcp-rtt',  label: fmtLbl('TCP RTT avg', tcpRttAvg), data: pointsWithGaps(tcp,  r => r.success ? r.rtt    : null), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)' }),
-            lineDataset({ metricId: 'loss', label: 'Loss (%)', data: pointsWithGaps(lossRows, r => r.loss ?? null), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true, yAxisID: 'yLoss' }),
             failureLegendDataset(tcpFailed.length, winStart),
+            lineDataset({ metricId: 'loss', label: 'Loss (%)', data: pointsWithGaps(lossRows, r => r.loss ?? null), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true, yAxisID: 'yLoss' }),
         ];
         yScales = {
             y:     { min: 0, position: 'left',  title: { display: true, text: 'latency', color: CH.dim }, ticks: { color: CH.dim, callback: v => fmtMs(v) }, grid: { color: CH.border } },
-            yLoss: { min: 0, max: 100, position: 'right', title: { display: true, text: '%', color: CH.dim }, ticks: { color: CH.dim, callback: v => v + '%' }, grid: { drawOnChartArea: false } },
+            yLoss: { min: 0, max: 100, position: 'right', title: { display: true, text: 'loss %', color: CH.dim }, ticks: { color: CH.dim, callback: v => v + '%' }, grid: { drawOnChartArea: false } },
         };
 
     } else if (tab === 'bandwidth') {
