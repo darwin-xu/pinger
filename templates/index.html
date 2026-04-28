@@ -321,11 +321,7 @@
     </div>
     <div style="display:flex; flex-direction:column; gap:12px">
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px 16px 16px">
-            <div style="height:220px"><canvas id="history-chart-latency"></canvas></div>
-        </div>
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
-            <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px">Loss</div>
-            <div style="height:220px"><canvas id="history-chart-loss"></canvas></div>
+            <div style="height:330px"><canvas id="history-chart-latency"></canvas></div>
         </div>
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
             <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px">Bandwidth</div>
@@ -634,7 +630,7 @@ function fetchAndRender(name) {
                 '?since=' + encodeURIComponent(since) + '&until=' + encodeURIComponent(until) + '&limit=' + limit)
         .then(r => r.json())
         .then(data => {
-            ['latency', 'bandwidth', 'loss'].forEach(tab => renderChart(name, tab, data, winStart, winEnd));
+            ['latency', 'bandwidth'].forEach(tab => renderChart(name, tab, data, winStart, winEnd));
             updateZoomControls(winStart, winEnd);
         })
         .catch(() => {});
@@ -917,13 +913,18 @@ function renderChart(name, tab, data, winStart, winEnd) {
         const jitterAvg = computeAvg(data.ping, 'jitter');
         const tcpRttAvg = computeAvg(data.tcp,  'rtt');
         const fmtLbl = (name, v) => v != null ? name + ': ' + fmtDur(v) : name;
+        const lossRows = prepRows(data.ping);
         datasets = [
             lineDataset({ metricId: 'ping-avg', label: fmtLbl('Ping avg', pingAvg),   data: pointsWithGaps(ping, r => r.success ? r.avg    : null), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)' }),
             lineDataset({ metricId: 'jitter',   label: fmtLbl('Jitter avg', jitterAvg), data: pointsWithGaps(ping, r => r.success ? r.jitter : null), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)' }),
             lineDataset({ metricId: 'tcp-rtt',  label: fmtLbl('TCP RTT avg', tcpRttAvg), data: pointsWithGaps(tcp,  r => r.success ? r.rtt    : null), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)' }),
+            lineDataset({ metricId: 'loss', label: 'Loss (%)', data: pointsWithGaps(lossRows, r => r.loss ?? null), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true, yAxisID: 'yLoss' }),
             failureLegendDataset(tcpFailed.length, winStart),
         ];
-        yScales = { y: { min: 0, title: { display: true, text: 'latency', color: CH.dim }, ticks: { color: CH.dim, callback: v => fmtMs(v) }, grid: { color: CH.border } } };
+        yScales = {
+            y:     { min: 0, position: 'left',  title: { display: true, text: 'latency', color: CH.dim }, ticks: { color: CH.dim, callback: v => fmtMs(v) }, grid: { color: CH.border } },
+            yLoss: { min: 0, max: 100, position: 'right', title: { display: true, text: '%', color: CH.dim }, ticks: { color: CH.dim, callback: v => v + '%' }, grid: { drawOnChartArea: false } },
+        };
 
     } else if (tab === 'bandwidth') {
         const rows = prepRows(data.iperf3);
@@ -938,12 +939,6 @@ function renderChart(name, tab, data, winStart, winEnd) {
         ];
         yScales = { y: { title: { display: true, text: 'Mbps', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
 
-    } else if (tab === 'loss') {
-        const rows = prepRows(data.ping);
-        datasets = [
-            lineDataset({ metricId: 'loss', label: 'Loss (%)', data: pointsWithGaps(rows, r => r.loss ?? null), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true }),
-        ];
-        yScales = { y: { min: 0, max: 100, title: { display: true, text: '%', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
     }
 
     const canvasEl = document.getElementById('history-chart-' + tab);
@@ -1020,6 +1015,7 @@ function renderChart(name, tab, data, winStart, winEnd) {
                     titleColor: CH.text, bodyColor: CH.dim,
                     callbacks: tab === 'latency' ? {
                         label: ctx => {
+                            if (ctx.dataset.metricId === 'loss') return 'Loss: ' + fmtNum(ctx.parsed.y) + '%';
                             const metricNames = { 'ping-avg': 'Ping avg', 'jitter': 'Jitter avg', 'tcp-rtt': 'TCP RTT avg' };
                             const metric = metricNames[ctx.dataset.metricId] || ctx.dataset.label;
                             return metric + ': ' + fmtMs(ctx.parsed.y);
