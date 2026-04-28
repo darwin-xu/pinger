@@ -18,10 +18,21 @@ DEPLOYED_AT=$(date +"%Y-%m-%d %H:%M:%S %Z")
 echo "==> Version (repo checksum): ${VERSION} (deployed ${DEPLOYED_AT})"
 
 echo "==> Syncing files to ${TARGET}:${REMOTE_DIR}"
-python3 checksum.py --files-only | rsync -av \
+SYNC_LOG=$(python3 checksum.py --files-only | rsync -av \
     --no-perms --no-owner --no-group \
     --files-from=- \
-    . "${TARGET}:${REMOTE_DIR}/"
+    . "${TARGET}:${REMOTE_DIR}/" 2>&1)
+echo "$SYNC_LOG"
+
+# Restart only when files that affect the running server changed:
+#   *.py        — application/probe logic
+#   *.html      — Jinja2 templates
+#   requirements.txt — dependency changes require reinstall + restart
+if ! echo "$SYNC_LOG" | grep -qE '\.(py|html)$|^requirements\.txt$'; then
+    echo "==> No server-affecting files changed; skipping restart"
+    echo "==> Done. Web UI should be available at http://$(echo "$TARGET" | cut -d@ -f2):8080"
+    exit 0
+fi
 
 echo "==> Restarting app on ${TARGET}"
 ssh "${TARGET}" "PINGER_CHECKSUM='${VERSION}' bash" <<'REMOTE'
