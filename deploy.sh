@@ -3,13 +3,25 @@
 #
 # Usage:
 #   chmod +x deploy.sh
-#   ./deploy.sh [user@host]          # e.g. root@ubuntu-1.local
+#   ./deploy.sh [-f] [user@host]      # e.g. darwin@ubuntu-1.local
+#
+# Options:
+#   -f, --force   Force restart even if no server-affecting files changed
 #
 # Defaults to root@ubuntu-1.local if no argument is given.
 
 set -euo pipefail
 
-TARGET="${1:-root@ubuntu-1.local}"
+FORCE=0
+ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        -f|--force) FORCE=1 ;;
+        *) ARGS+=("$arg") ;;
+    esac
+done
+
+TARGET="${ARGS[0]:-darwin@ubuntu-1.local}"
 REMOTE_DIR="./pinger"
 
 # Stamp the build: prefer git short hash, fall back to timestamp
@@ -28,8 +40,8 @@ echo "$SYNC_LOG"
 #   *.py        — application/probe logic
 #   *.html      — Jinja2 templates
 #   requirements.txt — dependency changes require reinstall + restart
-if ! echo "$SYNC_LOG" | grep -qE '\.(py|html)$|^requirements\.txt$'; then
-    echo "==> No server-affecting files changed; skipping restart"
+if [[ "$FORCE" -eq 0 ]] && ! echo "$SYNC_LOG" | grep -qE '\.(py|html)$|^requirements\.txt$'; then
+    echo "==> No server-affecting files changed; skipping restart (use -f to force)"
     echo "==> Done. Web UI should be available at http://$(echo "$TARGET" | cut -d@ -f2):8080"
     exit 0
 fi
