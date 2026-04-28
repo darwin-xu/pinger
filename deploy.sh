@@ -15,7 +15,7 @@ REMOTE_DIR="./pinger"
 # Stamp the build: prefer git short hash, fall back to timestamp
 VERSION=$(python3 -c "from checksum import compute_repo_checksum; print(compute_repo_checksum()[:8])" 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || date -u +%Y%m%dT%H%M%SZ)
 DEPLOYED_AT=$(date +"%Y-%m-%d %H:%M:%S %Z")
-echo "==> Version (repo checksum): ${VERSION} (deployed ${DEPLOYED_AT})"
+printf "==> Version (repo checksum): \033[1m%s\033[0m (deployed %s)\n" "${VERSION}" "${DEPLOYED_AT}"
 
 echo "==> Syncing files to ${TARGET}:${REMOTE_DIR}"
 SYNC_LOG=$(python3 checksum.py --files-only | rsync -av \
