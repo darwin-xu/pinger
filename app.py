@@ -90,6 +90,9 @@ def add_host():
         "ssh_user": request.form["ssh_user"].strip(),
         "ssh_port": int(request.form.get("ssh_port") or 22),
     }
+    provider = request.form.get("provider", "").strip()
+    if provider:
+        host_entry["provider"] = provider
     password = request.form.get("password", "").strip()
     if password:
         host_entry["password"] = password
@@ -113,6 +116,11 @@ def edit_host(idx: int):
             "ssh_user": request.form["ssh_user"].strip(),
             "ssh_port": int(request.form.get("ssh_port") or 22),
         }
+        provider = request.form.get("provider", "").strip()
+        if provider:
+            hosts[idx]["provider"] = provider
+        else:
+            hosts[idx].pop("provider", None)
         password = request.form.get("password", "").strip()
         if password:
             hosts[idx]["password"] = password

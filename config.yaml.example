@@ -15,17 +15,20 @@ thresholds:
 hosts:
 - name: google
   host: 35.234.22.51
+  provider: cloud.google.com  # optional; cloud service provider URL
   ssh_user: darwin
   ssh_port: 22
   iperf3: true
 - name: nube
   host: 64.118.147.86
+  provider: nube.com.ar
   ssh_user: root
   ssh_port: 22
   iperf3: true
   password: YOUR_SSH_PASSWORD  # optional; prefer SSH keys
 - name: nube-1
   host: 64.118.149.162
+  provider: nube.com.ar
   ssh_user: root
   ssh_port: 22
   iperf3: true

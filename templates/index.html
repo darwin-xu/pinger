@@ -236,7 +236,7 @@
 <table id="dashboard">
 <thead>
     <tr>
-        <th>#</th><th>Name</th><th>Host</th><th></th>
+        <th>#</th><th>Name</th><th>Provider</th><th>Host</th><th></th>
         <th>Ping avg</th><th>Jitter</th><th>Loss</th><th>TCP RTT</th>
         <th>↓ Mbps</th><th>↑ Mbps</th><th></th>
     </tr>
@@ -251,6 +251,7 @@
 <tr class="data-row" id="row-{{ loop.index0 }}" onclick="selectHost('{{ name }}', {{ loop.index0 }})">
     <td class="val-dim">{{ loop.index }}</td>
     <td><strong>{{ name }}</strong></td>
+    <td>{% if h.get('provider') %}<a href="{{ ('https://' + h.provider) if not h.provider.startswith('http') else h.provider }}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--cyan);text-decoration:none;font-size:0.85rem">{{ h.provider }}</a>{% else %}<span class="val-dim">—</span>{% endif %}</td>
     <td class="host-col">{{ h.host }}</td>
     <td class="icon">
         {% if not p %}?
@@ -276,10 +277,12 @@
 </tr>
 <!-- inline edit row -->
 <tr class="edit-row" id="edit-{{ loop.index0 }}">
-<td colspan="11">
+<td colspan="12">
     <form method="POST" action="/hosts/{{ loop.index0 }}/edit" class="edit-form">
         <div class="form-group"><label>Name</label>
             <input name="name" value="{{ h.name }}" required></div>
+        <div class="form-group"><label>Provider</label>
+            <input name="provider" value="{{ h.get('provider', '') }}" placeholder="cloud.google.com"></div>
         <div class="form-group"><label>Host</label>
             <input name="host" value="{{ h.host }}" required></div>
         <div class="form-group"><label>SSH User</label>
@@ -317,8 +320,7 @@
         </div>
     </div>
     <div style="display:flex; flex-direction:column; gap:12px">
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
-            <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px">Latency</div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px 16px 16px">
             <div style="height:220px"><canvas id="history-chart-latency"></canvas></div>
         </div>
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
@@ -339,6 +341,8 @@
             <div class="form-grid">
                 <div class="form-group"><label>Name</label>
                     <input name="name" placeholder="Tokyo-1" required></div>
+                <div class="form-group"><label>Provider (optional)</label>
+                    <input name="provider" placeholder="cloud.google.com"></div>
                 <div class="form-group"><label>Host / IP</label>
                     <input name="host" placeholder="1.2.3.4" required></div>
                 <div class="form-group"><label>SSH User</label>
@@ -709,6 +713,20 @@ function fmtDur(ms) {
 // Legacy alias used by chart tooltip
 function fmtMs(v) { return fmtDur(v); }
 
+// Compute the average of a numeric field over all successful rows in a dataset.
+// The API already filters rows to the current window via since/until, so no
+// additional time-range filtering is needed here.
+function computeAvg(rows, field) {
+    let sum = 0, count = 0;
+    for (const row of rows) {
+        if (row.success && row[field] != null) {
+            sum += row[field];
+            count++;
+        }
+    }
+    return count > 0 ? sum / count : null;
+}
+
 function isLargeProbeGap(ctx) {
     return !!(ctx.p1 && ctx.p1.raw && ctx.p1.raw.gapFromPrev);
 }
@@ -776,6 +794,20 @@ function isMetricVisible(chart, metricId) {
 Chart.Tooltip.positioners.cursor = function(_elements, eventPosition) {
     return { x: eventPosition.x, y: eventPosition.y };
 };
+
+// Plugin: add extra vertical space between legend labels and the plot area
+// on the latency chart, by increasing the legend block height after fit().
+Chart.register({
+    id: 'legendBottomMargin',
+    beforeInit(chart) {
+        if (chart.canvas.id !== 'history-chart-latency') return;
+        const orig = chart.legend.fit.bind(chart.legend);
+        chart.legend.fit = function () {
+            orig();
+            this.height += 10;
+        };
+    }
+});
 
 // Global plugin: suppress tooltip when the hovered x position has no real data
 // (prevents the tooltip from showing in gaps or empty regions of the chart)
@@ -881,10 +913,14 @@ function renderChart(name, tab, data, winStart, winEnd) {
         });
         _tcpFailed = tcpFailed;
         _tcpFailedThreshold = aggregated ? (winEnd - winStart) / 200 : 20_000;
+        const pingAvg   = computeAvg(data.ping, 'avg');
+        const jitterAvg = computeAvg(data.ping, 'jitter');
+        const tcpRttAvg = computeAvg(data.tcp,  'rtt');
+        const fmtLbl = (name, v) => v != null ? name + ': ' + fmtDur(v) : name;
         datasets = [
-            lineDataset({ metricId: 'ping-avg', label: 'Ping avg (ms)', data: pointsWithGaps(ping, r => r.success ? r.avg    : null), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)' }),
-            lineDataset({ metricId: 'jitter',   label: 'Jitter (ms)',   data: pointsWithGaps(ping, r => r.success ? r.jitter : null), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)' }),
-            lineDataset({ metricId: 'tcp-rtt',  label: 'TCP RTT (ms)', data: pointsWithGaps(tcp,  r => r.success ? r.rtt    : null), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)' }),
+            lineDataset({ metricId: 'ping-avg', label: fmtLbl('Ping avg', pingAvg),   data: pointsWithGaps(ping, r => r.success ? r.avg    : null), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)' }),
+            lineDataset({ metricId: 'jitter',   label: fmtLbl('Jitter avg', jitterAvg), data: pointsWithGaps(ping, r => r.success ? r.jitter : null), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)' }),
+            lineDataset({ metricId: 'tcp-rtt',  label: fmtLbl('TCP RTT avg', tcpRttAvg), data: pointsWithGaps(tcp,  r => r.success ? r.rtt    : null), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)' }),
             failureLegendDataset(tcpFailed.length, winStart),
         ];
         yScales = { y: { min: 0, title: { display: true, text: 'latency', color: CH.dim }, ticks: { color: CH.dim, callback: v => fmtMs(v) }, grid: { color: CH.border } } };
@@ -984,9 +1020,8 @@ function renderChart(name, tab, data, winStart, winEnd) {
                     titleColor: CH.text, bodyColor: CH.dim,
                     callbacks: tab === 'latency' ? {
                         label: ctx => {
-                            const metric = ctx.dataset.metricId === 'tcp-rtt'
-                                ? 'TCP RTT'
-                                : ctx.dataset.label.split(' (')[0];
+                            const metricNames = { 'ping-avg': 'Ping avg', 'jitter': 'Jitter avg', 'tcp-rtt': 'TCP RTT avg' };
+                            const metric = metricNames[ctx.dataset.metricId] || ctx.dataset.label;
                             return metric + ': ' + fmtMs(ctx.parsed.y);
                         },
                     } : {},
@@ -1069,6 +1104,8 @@ function refreshDashboard() {
                 html += '<tr class="data-row' + sel + '" id="row-' + i + '" onclick="selectHost(\'' + safeName + '\',' + i + ')">';
                 html += '<td class="val-dim">' + (i+1) + '</td>';
                 html += '<td><strong>' + name + '</strong></td>';
+                const providerUrl = h.provider ? (h.provider.startsWith('http') ? h.provider : 'https://' + h.provider) : null;
+                html += '<td>' + (providerUrl ? '<a href="' + escAttr(providerUrl) + '" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none;font-size:0.85rem" onclick="event.stopPropagation()">' + escAttr(h.provider) + '</a>' : '<span class="val-dim">\u2014</span>') + '</td>';
                 html += '<td class="host-col">' + h.host + '</td>';
                 html += '<td class="icon">' + icon + '</td>';
                 const FAIL = '<span class="val-red">✗</span>';
@@ -1085,9 +1122,10 @@ function refreshDashboard() {
                 html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(\'Delete '+safeName+'?\')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
                 html += '</td></tr>';
 
-                html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="11">';
+                html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="12">';
                 html += '<form method="POST" action="/hosts/'+i+'/edit" class="edit-form">';
                 html += '<div class="form-group"><label>Name</label><input name="name" value="'+h.name+'" required></div>';
+                html += '<div class="form-group"><label>Provider</label><input name="provider" value="'+escAttr(h.provider||'')+'" placeholder="cloud.google.com"></div>';
                 html += '<div class="form-group"><label>Host</label><input name="host" value="'+h.host+'" required></div>';
                 html += '<div class="form-group"><label>SSH User</label><input name="ssh_user" value="'+(h.ssh_user||'')+'"></div>';
                 html += '<div class="form-group"><label>SSH Port</label><input name="ssh_port" type="number" value="'+(h.ssh_port||22)+'"></div>';
