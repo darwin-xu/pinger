@@ -5,207 +5,207 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>pinger — VPS Network Monitor</title>
 <style>
-  :root {
-    --bg:       #0d1117;
-    --surface:  #161b22;
-    --border:   #30363d;
-    --text:     #c9d1d9;
-    --text-dim: #8b949e;
-    --green:    #3fb950;
-    --yellow:   #d29922;
-    --red:      #f85149;
-    --cyan:     #58a6ff;
-    --radius:   8px;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    padding: 24px;
-    line-height: 1.5;
-  }
-  h1 { font-size: 1.5rem; color: var(--cyan); margin-bottom: 4px; }
-  .subtitle { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 24px; }
-  .subtitle .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-    margin-right: 6px; vertical-align: middle; }
-  .dot.on  { background: var(--green); }
-  .dot.off { background: var(--red); }
+    :root {
+        --bg:       #0d1117;
+        --surface:  #161b22;
+        --border:   #30363d;
+        --text:     #c9d1d9;
+        --text-dim: #8b949e;
+        --green:    #3fb950;
+        --yellow:   #d29922;
+        --red:      #f85149;
+        --cyan:     #58a6ff;
+        --radius:   8px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        padding: 24px;
+        line-height: 1.5;
+    }
+    h1 { font-size: 1.5rem; color: var(--cyan); margin-bottom: 4px; }
+    .subtitle { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 24px; }
+    .subtitle .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+        margin-right: 6px; vertical-align: middle; }
+    .dot.on  { background: var(--green); }
+    .dot.off { background: var(--red); }
 
-  /* ── Table ──────────────────────────────────────────── */
-  table { width: 100%; border-collapse: collapse; margin-bottom: 32px; }
-  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-  th { color: var(--cyan); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;
-    background: var(--surface); position: sticky; top: 0; }
-  td { font-size: 0.9rem; font-variant-numeric: tabular-nums; }
-  tr:hover td { background: rgba(88,166,255,0.05); }
+    /* ── Table ──────────────────────────────────────────── */
+    table { width: 100%; border-collapse: collapse; margin-bottom: 32px; }
+    th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    th { color: var(--cyan); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;
+        background: var(--surface); position: sticky; top: 0; }
+    td { font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+    tr:hover td { background: rgba(88,166,255,0.05); }
 
-  .val-green  { color: var(--green); }
-  .val-yellow { color: var(--yellow); }
-  .val-red    { color: var(--red); }
-  .val-dim    { color: var(--text-dim); }
-  .icon       { font-size: 1.1rem; text-align: center; }
-  .host-col   { color: var(--text-dim); font-size: 0.85rem; }
+    .val-green  { color: var(--green); }
+    .val-yellow { color: var(--yellow); }
+    .val-red    { color: var(--red); }
+    .val-dim    { color: var(--text-dim); }
+    .icon       { font-size: 1.1rem; text-align: center; }
+    .host-col   { color: var(--text-dim); font-size: 0.85rem; }
 
-  /* ── Actions column ─────────────────────────────────── */
-  .btn-sm {
-    border: none; background: transparent; cursor: pointer;
-    font-size: 0.85rem; padding: 2px 6px; border-radius: 4px;
-  }
-  .btn-edit   { color: var(--cyan); }
-  .btn-delete { color: var(--red); }
-  .btn-sm:hover { background: var(--border); }
+    /* ── Actions column ─────────────────────────────────── */
+    .btn-sm {
+        border: none; background: transparent; cursor: pointer;
+        font-size: 0.85rem; padding: 2px 6px; border-radius: 4px;
+    }
+    .btn-edit   { color: var(--cyan); }
+    .btn-delete { color: var(--red); }
+    .btn-sm:hover { background: var(--border); }
 
-  /* ── Sections ───────────────────────────────────────── */
-  .section { background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 20px; margin-bottom: 24px; }
-  .section h2 { font-size: 1.1rem; margin-bottom: 16px; color: var(--cyan); }
+    /* ── Sections ───────────────────────────────────────── */
+    .section { background: var(--surface); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 20px; margin-bottom: 24px; }
+    .section h2 { font-size: 1.1rem; margin-bottom: 16px; color: var(--cyan); }
 
-  /* ── Forms ──────────────────────────────────────────── */
-  .form-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 12px;
-    align-items: end;
-  }
-  .form-group { display: flex; flex-direction: column; }
-  .form-group label {
-    font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase;
-    letter-spacing: 0.04em; margin-bottom: 4px;
-  }
-  .form-group input, .form-group select {
-    background: var(--bg); border: 1px solid var(--border); color: var(--text);
-    padding: 6px 10px; border-radius: 4px; font-size: 0.9rem;
-  }
-  .form-group input:focus { outline: none; border-color: var(--cyan); }
-  .checkbox-group {
-    display: flex; align-items: center; gap: 6px; padding-top: 6px;
-  }
-  .checkbox-group input[type="checkbox"] { accent-color: var(--cyan); }
+    /* ── Forms ──────────────────────────────────────────── */
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 12px;
+        align-items: end;
+    }
+    .form-group { display: flex; flex-direction: column; }
+    .form-group label {
+        font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase;
+        letter-spacing: 0.04em; margin-bottom: 4px;
+    }
+    .form-group input, .form-group select {
+        background: var(--bg); border: 1px solid var(--border); color: var(--text);
+        padding: 6px 10px; border-radius: 4px; font-size: 0.9rem;
+    }
+    .form-group input:focus { outline: none; border-color: var(--cyan); }
+    .checkbox-group {
+        display: flex; align-items: center; gap: 6px; padding-top: 6px;
+    }
+    .checkbox-group input[type="checkbox"] { accent-color: var(--cyan); }
 
-  /* ── Settings inline grid (label + input on same row) ── */
-  .settings-grid {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 6px 12px;
-    align-items: center;
-  }
-  .settings-grid label {
-    font-size: 0.85rem; color: var(--text-dim);
-  }
-  .settings-grid input {
-    background: var(--bg); border: 1px solid var(--border); color: var(--text);
-    padding: 5px 8px; border-radius: 4px; font-size: 0.9rem;
-    width: 90px; text-align: right;
-  }
-  .settings-grid input:focus { outline: none; border-color: var(--cyan); }
+    /* ── Settings inline grid (label + input on same row) ── */
+    .settings-grid {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 6px 12px;
+        align-items: center;
+    }
+    .settings-grid label {
+        font-size: 0.85rem; color: var(--text-dim);
+    }
+    .settings-grid input {
+        background: var(--bg); border: 1px solid var(--border); color: var(--text);
+        padding: 5px 8px; border-radius: 4px; font-size: 0.9rem;
+        width: 90px; text-align: right;
+    }
+    .settings-grid input:focus { outline: none; border-color: var(--cyan); }
 
-  .btn {
-    border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer;
-    font-size: 0.9rem; font-weight: 500;
-  }
-  .btn-primary   { background: var(--cyan); color: var(--bg); }
-  .btn-primary:hover { opacity: 0.85; }
-  .btn-secondary { background: var(--border); color: var(--text); }
+    .btn {
+        border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer;
+        font-size: 0.9rem; font-weight: 500;
+    }
+    .btn-primary   { background: var(--cyan); color: var(--bg); }
+    .btn-primary:hover { opacity: 0.85; }
+    .btn-secondary { background: var(--border); color: var(--text); }
 
-  /* ── Edit modal (inline) ────────────────────────────── */
-  .edit-row { display: none; }
-  .edit-row.active { display: table-row; }
-  .edit-row td { background: var(--surface); padding: 12px; }
-  .edit-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
-  .edit-form .form-group { min-width: 120px; }
+    /* ── Edit modal (inline) ────────────────────────────── */
+    .edit-row { display: none; }
+    .edit-row.active { display: table-row; }
+    .edit-row td { background: var(--surface); padding: 12px; }
+    .edit-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+    .edit-form .form-group { min-width: 120px; }
 
-  /* ── Table header bar ───────────────────────────────── */
-  .table-header {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 8px;
-  }
-  .table-header h2 { font-size: 1rem; color: var(--text-dim); font-weight: 500; }
+    /* ── Table header bar ───────────────────────────────── */
+    .table-header {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 8px;
+    }
+    .table-header h2 { font-size: 1rem; color: var(--text-dim); font-weight: 500; }
 
-  /* ── Page header ─────────────────────────────────────── */
-  .page-header {
-    display: flex; justify-content: space-between; align-items: flex-start;
-    margin-bottom: 24px;
-  }
-  .page-header-left h1 { margin-bottom: 4px; }
-  .page-header-left .subtitle { margin-bottom: 0; }
+    /* ── Page header ─────────────────────────────────────── */
+    .page-header {
+        display: flex; justify-content: space-between; align-items: flex-start;
+        margin-bottom: 24px;
+    }
+    .page-header-left h1 { margin-bottom: 4px; }
+    .page-header-left .subtitle { margin-bottom: 0; }
 
-  /* ── Modal overlay ──────────────────────────────────── */
-  .modal-overlay {
-    display: none; position: fixed; inset: 0;
-    background: rgba(0,0,0,0.6); z-index: 100;
-    align-items: center; justify-content: center;
-  }
-  .modal-overlay.active { display: flex; }
-  .modal {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 24px; min-width: 360px;
-    max-width: 90vw; max-height: 85vh; overflow-y: auto;
-    position: relative;
-  }
-  .modal h2 { font-size: 1.1rem; color: var(--cyan); margin-bottom: 16px; }
-  .modal-close {
-    position: absolute; top: 12px; right: 14px;
-    background: none; border: none; color: var(--text-dim);
-    font-size: 1.2rem; cursor: pointer; line-height: 1;
-  }
-  .modal-close:hover { color: var(--text); }
+    /* ── Modal overlay ──────────────────────────────────── */
+    .modal-overlay {
+        display: none; position: fixed; inset: 0;
+        background: rgba(0,0,0,0.6); z-index: 100;
+        align-items: center; justify-content: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 24px; min-width: 360px;
+        max-width: 90vw; max-height: 85vh; overflow-y: auto;
+        position: relative;
+    }
+    .modal h2 { font-size: 1.1rem; color: var(--cyan); margin-bottom: 16px; }
+    .modal-close {
+        position: absolute; top: 12px; right: 14px;
+        background: none; border: none; color: var(--text-dim);
+        font-size: 1.2rem; cursor: pointer; line-height: 1;
+    }
+    .modal-close:hover { color: var(--text); }
 
-  /* ── Selected row + chart tabs ────────────────────────────── */
-  .data-row { cursor: pointer; }
-  .data-row.selected td { background: rgba(88,166,255,0.1) !important; }
-  .chart-tab {
-    border: 1px solid var(--border); background: transparent;
-    color: var(--text-dim); padding: 5px 14px; border-radius: 4px;
-    cursor: pointer; font-size: 0.85rem; margin-left: 4px;
-  }
-  .chart-tab:hover { background: var(--border); color: var(--text); }
-  .chart-tab.active { background: var(--cyan); color: var(--bg); border-color: var(--cyan); }
+    /* ── Selected row + chart tabs ────────────────────────────── */
+    .data-row { cursor: pointer; }
+    .data-row.selected td { background: rgba(88,166,255,0.1) !important; }
+    .chart-tab {
+        border: 1px solid var(--border); background: transparent;
+        color: var(--text-dim); padding: 5px 14px; border-radius: 4px;
+        cursor: pointer; font-size: 0.85rem; margin-left: 4px;
+    }
+    .chart-tab:hover { background: var(--border); color: var(--text); }
+    .chart-tab.active { background: var(--cyan); color: var(--bg); border-color: var(--cyan); }
 
-  /* ── Zoom controls ────────────────────────────────────── */
-  .zoom-controls { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px; }
-  .zoom-range-label { font-size:0.78rem; color:var(--text-dim); font-variant-numeric:tabular-nums; min-width:200px; }
-  .zoom-btns { display:flex; gap:3px; align-items:center; }
-  .zoom-nav-btn {
-    border:1px solid var(--border); background:var(--surface); color:var(--text-dim);
-    cursor:pointer; font-size:0.85rem; padding:2px 9px; border-radius:4px; line-height:1.6;
-  }
-  .zoom-nav-btn:hover { background:var(--border); color:var(--text); }
-  .zoom-level-btn {
-    border:1px solid var(--border); background:transparent; color:var(--text-dim);
-    cursor:pointer; font-size:0.75rem; padding:3px 7px; border-radius:4px;
-  }
-  .zoom-level-btn:hover { background:var(--border); }
-  .zoom-level-btn.active { background:var(--cyan); color:var(--bg); border-color:var(--cyan); }
-  .zoom-sep { display:inline-block; width:6px; }
-  .zoom-live-btn {
-    border:1px solid var(--border); background:transparent; color:var(--green);
-    cursor:pointer; font-size:0.75rem; padding:3px 8px; border-radius:4px; margin-left:4px;
-  }
-  .zoom-live-btn.paused { color:var(--text-dim); }
-  .zoom-live-btn:hover { background:var(--border); }
+    /* ── Zoom controls ────────────────────────────────────── */
+    .zoom-controls { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px; }
+    .zoom-range-label { font-size:0.78rem; color:var(--text-dim); font-variant-numeric:tabular-nums; min-width:200px; }
+    .zoom-btns { display:flex; gap:3px; align-items:center; }
+    .zoom-nav-btn {
+        border:1px solid var(--border); background:var(--surface); color:var(--text-dim);
+        cursor:pointer; font-size:0.85rem; padding:2px 9px; border-radius:4px; line-height:1.6;
+    }
+    .zoom-nav-btn:hover { background:var(--border); color:var(--text); }
+    .zoom-level-btn {
+        border:1px solid var(--border); background:transparent; color:var(--text-dim);
+        cursor:pointer; font-size:0.75rem; padding:3px 7px; border-radius:4px;
+    }
+    .zoom-level-btn:hover { background:var(--border); }
+    .zoom-level-btn.active { background:var(--cyan); color:var(--bg); border-color:var(--cyan); }
+    .zoom-sep { display:inline-block; width:6px; }
+    .zoom-live-btn {
+        border:1px solid var(--border); background:transparent; color:var(--green);
+        cursor:pointer; font-size:0.75rem; padding:3px 8px; border-radius:4px; margin-left:4px;
+    }
+    .zoom-live-btn.paused { color:var(--text-dim); }
+    .zoom-live-btn:hover { background:var(--border); }
 
-  /* ── Stale-version banner ────────────────────────────────── */
-  #stale-banner {
-    display: none;
-    position: fixed; top: 0; left: 0; right: 0; z-index: 200;
-    background: var(--yellow); color: var(--bg);
-    text-align: center; padding: 8px 16px; font-size: 0.88rem; font-weight: 500;
-    cursor: pointer;
-  }
-  #stale-banner:hover { opacity: 0.9; }
+    /* ── Stale-version banner ────────────────────────────────── */
+    #stale-banner {
+        display: none;
+        position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+        background: var(--yellow); color: var(--bg);
+        text-align: center; padding: 8px 16px; font-size: 0.88rem; font-weight: 500;
+        cursor: pointer;
+    }
+    #stale-banner:hover { opacity: 0.9; }
 
-  /* ── iperf3 trigger button ───────────────────────────── */
-  .btn-run { color: var(--green); }
-  .btn-run.running { color: var(--yellow); animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .err-tip { cursor: help; }
+    /* ── iperf3 trigger button ───────────────────────────── */
+    .btn-run { color: var(--green); }
+    .btn-run.running { color: var(--yellow); animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .err-tip { cursor: help; }
 
-  /* ── Responsive ─────────────────────────────────────── */
-  @media (max-width: 900px) {
-    body { padding: 12px; }
-    .form-grid { grid-template-columns: 1fr 1fr; }
-  }
+    /* ── Responsive ─────────────────────────────────────── */
+    @media (max-width: 900px) {
+        body { padding: 12px; }
+        .form-grid { grid-template-columns: 1fr 1fr; }
+    }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -215,31 +215,31 @@
 <div id="stale-banner" onclick="location.reload()"></div>
 
 <div class="page-header">
-  <div class="page-header-left">
-    <h1>pinger</h1>
-    <p class="subtitle">
-      <span class="dot {{ 'on' if running else 'off' }}"></span>
-      Probes {{ "running" if running else "stopped" }}
-      · <span id="app-version" style="color:var(--text-dim);font-size:0.78rem">…</span>
-    </p>
-  </div>
-  <div>
-    <button class="btn btn-secondary" onclick="openModal('modal-settings')">⚙ Settings</button>
-  </div>
+    <div class="page-header-left">
+        <h1>pinger</h1>
+        <p class="subtitle">
+            <span class="dot {{ 'on' if running else 'off' }}"></span>
+            Probes {{ "running" if running else "stopped" }}
+            · <span id="app-version" style="color:var(--text-dim);font-size:0.78rem">…</span>
+        </p>
+    </div>
+    <div>
+        <button class="btn btn-secondary" onclick="openModal('modal-settings')">⚙ Settings</button>
+    </div>
 </div>
 
 <!-- ── Dashboard table ──────────────────────────────────────────────────── -->
 <div class="table-header">
-  <h2>Server Status</h2>
-  <button class="btn btn-primary" onclick="openModal('modal-add')">＋ Add Host</button>
+    <h2>Server Status</h2>
+    <button class="btn btn-primary" onclick="openModal('modal-add')">＋ Add Host</button>
 </div>
 <table id="dashboard">
 <thead>
-  <tr>
-    <th>#</th><th>Name</th><th>Host</th><th></th>
-    <th>Ping avg</th><th>Jitter</th><th>Loss</th><th>TCP RTT</th>
-    <th>↓ Mbps</th><th>↑ Mbps</th><th></th>
-  </tr>
+    <tr>
+        <th>#</th><th>Name</th><th>Host</th><th></th>
+        <th>Ping avg</th><th>Jitter</th><th>Loss</th><th>TCP RTT</th>
+        <th>↓ Mbps</th><th>↑ Mbps</th><th></th>
+    </tr>
 </thead>
 <tbody id="host-rows">
 {% for h in hosts %}
@@ -249,48 +249,48 @@
 {% set t = r.get('tcp', {}) %}
 {% set ip = r.get('iperf3', {}) %}
 <tr class="data-row" id="row-{{ loop.index0 }}" onclick="selectHost('{{ name }}', {{ loop.index0 }})">
-  <td class="val-dim">{{ loop.index }}</td>
-  <td><strong>{{ name }}</strong></td>
-  <td class="host-col">{{ h.host }}</td>
-  <td class="icon">
-    {% if not p %}?
-    {% elif not p.get('success') or p.get('loss', 100) >= 50 %}<span class="val-red">✗</span>
-    {% elif p.get('loss', 0) >= 1 or not t.get('success') %}<span class="val-yellow">⚠</span>
-    {% else %}<span class="val-green">✓</span>
-    {% endif %}
-  </td>
-  <td>{% if p.get('success') and p.avg is not none %}{{ p.avg | fmt_duration }}{% elif p.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
-  <td>{% if p.get('success') and p.jitter is not none %}{{ p.jitter | fmt_duration }}{% elif p.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
-  <td>{{ ('%0.2f%%' % p.loss) if p.loss is defined and p.loss is not none else '—' }}</td>
-  <td>{% if t.get('success') and t.rtt is not none %}{{ t.rtt | fmt_duration }}{% elif t.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
-  <td>{% if ip.get('success') and ip.download_mbps is not none %}{{ '%0.0f' % ip.download_mbps }}{% elif ip.get('success') == false and ip.get('error') %}<span class="val-yellow err-tip" title="{{ ip.get('error')|e }}">⚠</span>{% else %}—{% endif %}</td>
-  <td>{{ ('%0.0f' % ip.upload_mbps) if ip.get('success') and ip.upload_mbps is not none else '—' }}</td>
-  <td onclick="event.stopPropagation()">
-    <button class="btn-sm btn-run" id="run-{{ loop.index0 }}" onclick="triggerIperf3({{ loop.index0 }})" title="Run bandwidth test now">⚡</button>
-    <button class="btn-sm btn-edit" onclick="toggleEdit({{ loop.index0 }})">✎</button>
-    <form method="POST" action="/hosts/{{ loop.index0 }}/delete" style="display:inline"
-          onsubmit="return confirm('Delete {{ name }}?')">
-      <button class="btn-sm btn-delete" type="submit">✕</button>
-    </form>
-  </td>
+    <td class="val-dim">{{ loop.index }}</td>
+    <td><strong>{{ name }}</strong></td>
+    <td class="host-col">{{ h.host }}</td>
+    <td class="icon">
+        {% if not p %}?
+        {% elif not p.get('success') or p.get('loss', 100) >= 50 %}<span class="val-red">✗</span>
+        {% elif p.get('loss', 0) >= 1 or not t.get('success') %}<span class="val-yellow">⚠</span>
+        {% else %}<span class="val-green">✓</span>
+        {% endif %}
+    </td>
+    <td>{% if p.get('success') and p.avg is not none %}{{ p.avg | fmt_duration }}{% elif p.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
+    <td>{% if p.get('success') and p.jitter is not none %}{{ p.jitter | fmt_duration }}{% elif p.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
+    <td>{{ ('%0.2f%%' % p.loss) if p.loss is defined and p.loss is not none else '—' }}</td>
+    <td>{% if t.get('success') and t.rtt is not none %}{{ t.rtt | fmt_duration }}{% elif t.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
+    <td>{% if ip.get('success') and ip.download_mbps is not none %}{{ '%0.0f' % ip.download_mbps }}{% elif ip.get('success') == false and ip.get('error') %}<span class="val-yellow err-tip" title="{{ ip.get('error')|e }}">⚠</span>{% else %}—{% endif %}</td>
+    <td>{{ ('%0.0f' % ip.upload_mbps) if ip.get('success') and ip.upload_mbps is not none else '—' }}</td>
+    <td onclick="event.stopPropagation()">
+        <button class="btn-sm btn-run" id="run-{{ loop.index0 }}" onclick="triggerIperf3({{ loop.index0 }})" title="Run bandwidth test now">⚡</button>
+        <button class="btn-sm btn-edit" onclick="toggleEdit({{ loop.index0 }})">✎</button>
+        <form method="POST" action="/hosts/{{ loop.index0 }}/delete" style="display:inline"
+                    onsubmit="return confirm('Delete {{ name }}?')">
+            <button class="btn-sm btn-delete" type="submit">✕</button>
+        </form>
+    </td>
 </tr>
 <!-- inline edit row -->
 <tr class="edit-row" id="edit-{{ loop.index0 }}">
 <td colspan="11">
-  <form method="POST" action="/hosts/{{ loop.index0 }}/edit" class="edit-form">
-    <div class="form-group"><label>Name</label>
-      <input name="name" value="{{ h.name }}" required></div>
-    <div class="form-group"><label>Host</label>
-      <input name="host" value="{{ h.host }}" required></div>
-    <div class="form-group"><label>SSH User</label>
-      <input name="ssh_user" value="{{ h.ssh_user }}"></div>
-    <div class="form-group"><label>SSH Port</label>
-      <input name="ssh_port" type="number" value="{{ h.get('ssh_port', 22) }}"></div>
-    <div class="form-group"><label>Password</label>
-      <input name="password" type="password" autocomplete="new-password" value="{{ h.get('password', '') }}" placeholder="leave blank for key/agent"></div>
-    <button type="submit" class="btn btn-primary">Save</button>
-    <button type="button" class="btn btn-secondary" onclick="toggleEdit({{ loop.index0 }})">Cancel</button>
-  </form>
+    <form method="POST" action="/hosts/{{ loop.index0 }}/edit" class="edit-form">
+        <div class="form-group"><label>Name</label>
+            <input name="name" value="{{ h.name }}" required></div>
+        <div class="form-group"><label>Host</label>
+            <input name="host" value="{{ h.host }}" required></div>
+        <div class="form-group"><label>SSH User</label>
+            <input name="ssh_user" value="{{ h.ssh_user }}"></div>
+        <div class="form-group"><label>SSH Port</label>
+            <input name="ssh_port" type="number" value="{{ h.get('ssh_port', 22) }}"></div>
+        <div class="form-group"><label>Password</label>
+            <input name="password" type="password" autocomplete="new-password" value="{{ h.get('password', '') }}" placeholder="leave blank for key/agent"></div>
+        <button type="submit" class="btn btn-primary">Save</button>
+        <button type="button" class="btn btn-secondary" onclick="toggleEdit({{ loop.index0 }})">Cancel</button>
+    </form>
 </td>
 </tr>
 {% endfor %}
@@ -299,114 +299,114 @@
 
 <!-- ── History chart ────────────────────────────────────────────── -->
 <div id="chart-section" style="display:none; margin-bottom:32px">
-  <div class="table-header" style="margin-bottom:6px">
-    <h2>History &mdash; <span id="chart-host-name"></span></h2>
-    <div class="zoom-controls" style="margin-bottom:0">
-      <span id="chart-range-label" class="zoom-range-label"></span>
-      <div class="zoom-btns">
-        <button class="zoom-nav-btn" onclick="panLeft()"  title="Pan left">&#9664;</button>
-        <button class="zoom-level-btn" id="zlbtn-0" onclick="setZoomLevel(0)">10m</button>
-        <button class="zoom-level-btn" id="zlbtn-1" onclick="setZoomLevel(1)">1h</button>
-        <button class="zoom-level-btn" id="zlbtn-2" onclick="setZoomLevel(2)">12h</button>
-        <button class="zoom-level-btn" id="zlbtn-3" onclick="setZoomLevel(3)">1d</button>
-        <button class="zoom-level-btn" id="zlbtn-4" onclick="setZoomLevel(4)">7d</button>
-        <button class="zoom-level-btn" id="zlbtn-5" onclick="setZoomLevel(5)">1mo</button>
-        <button class="zoom-nav-btn" onclick="panRight()" title="Pan right">&#9654;</button>
-        <button class="zoom-live-btn" id="btn-live" onclick="setLive()">&#9679; live</button>
-      </div>
+    <div class="table-header" style="margin-bottom:6px">
+        <h2>History &mdash; <span id="chart-host-name"></span></h2>
+        <div class="zoom-controls" style="margin-bottom:0">
+            <span id="chart-range-label" class="zoom-range-label"></span>
+            <div class="zoom-btns">
+                <button class="zoom-nav-btn" onclick="panLeft()"  title="Pan left">&#9664;</button>
+                <button class="zoom-level-btn" id="zlbtn-0" onclick="setZoomLevel(0)">10m</button>
+                <button class="zoom-level-btn" id="zlbtn-1" onclick="setZoomLevel(1)">1h</button>
+                <button class="zoom-level-btn" id="zlbtn-2" onclick="setZoomLevel(2)">12h</button>
+                <button class="zoom-level-btn" id="zlbtn-3" onclick="setZoomLevel(3)">1d</button>
+                <button class="zoom-level-btn" id="zlbtn-4" onclick="setZoomLevel(4)">7d</button>
+                <button class="zoom-level-btn" id="zlbtn-5" onclick="setZoomLevel(5)">1mo</button>
+                <button class="zoom-nav-btn" onclick="panRight()" title="Pan right">&#9654;</button>
+                <button class="zoom-live-btn" id="btn-live" onclick="setLive()">&#9679; live</button>
+            </div>
+        </div>
     </div>
-  </div>
-  <div style="display:flex; flex-direction:column; gap:12px">
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
-      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px">Latency</div>
-      <div style="height:220px"><canvas id="history-chart-latency"></canvas></div>
+    <div style="display:flex; flex-direction:column; gap:12px">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+            <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px">Latency</div>
+            <div style="height:220px"><canvas id="history-chart-latency"></canvas></div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+            <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px">Loss</div>
+            <div style="height:220px"><canvas id="history-chart-loss"></canvas></div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+            <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px">Bandwidth</div>
+            <div style="height:220px"><canvas id="history-chart-bandwidth"></canvas></div>
+        </div>
     </div>
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
-      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px">Loss</div>
-      <div style="height:220px"><canvas id="history-chart-loss"></canvas></div>
-    </div>
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
-      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px">Bandwidth</div>
-      <div style="height:220px"><canvas id="history-chart-bandwidth"></canvas></div>
-    </div>
-  </div>
 </div>
 <div class="modal-overlay" id="modal-add" onclick="closeModalIfBg(event, 'modal-add')">
-  <div class="modal">
-    <button class="modal-close" onclick="closeModal('modal-add')">✕</button>
-    <h2>Add Host</h2>
-    <form method="POST" action="/hosts/add">
-      <div class="form-grid">
-        <div class="form-group"><label>Name</label>
-          <input name="name" placeholder="Tokyo-1" required></div>
-        <div class="form-group"><label>Host / IP</label>
-          <input name="host" placeholder="1.2.3.4" required></div>
-        <div class="form-group"><label>SSH User</label>
-          <input name="ssh_user" value="root"></div>
-        <div class="form-group"><label>SSH Port</label>
-          <input name="ssh_port" type="number" value="22"></div>
-        <div class="form-group"><label>Password (optional)</label>
-          <input name="password" type="password" autocomplete="new-password" placeholder="leave blank for key/agent"></div>
-      </div>
-      <br>
-      <button type="submit" class="btn btn-primary">Add Host</button>
-      <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add')" style="margin-left:8px">Cancel</button>
-    </form>
-  </div>
+    <div class="modal">
+        <button class="modal-close" onclick="closeModal('modal-add')">✕</button>
+        <h2>Add Host</h2>
+        <form method="POST" action="/hosts/add">
+            <div class="form-grid">
+                <div class="form-group"><label>Name</label>
+                    <input name="name" placeholder="Tokyo-1" required></div>
+                <div class="form-group"><label>Host / IP</label>
+                    <input name="host" placeholder="1.2.3.4" required></div>
+                <div class="form-group"><label>SSH User</label>
+                    <input name="ssh_user" value="root"></div>
+                <div class="form-group"><label>SSH Port</label>
+                    <input name="ssh_port" type="number" value="22"></div>
+                <div class="form-group"><label>Password (optional)</label>
+                    <input name="password" type="password" autocomplete="new-password" placeholder="leave blank for key/agent"></div>
+            </div>
+            <br>
+            <button type="submit" class="btn btn-primary">Add Host</button>
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add')" style="margin-left:8px">Cancel</button>
+        </form>
+    </div>
 </div>
 
 <!-- ── Settings modal ────────────────────────────────────────────────────── -->
 <div class="modal-overlay" id="modal-settings" onclick="closeModalIfBg(event, 'modal-settings')">
-  <div class="modal">
-    <button class="modal-close" onclick="closeModal('modal-settings')">✕</button>
-    <h2>Settings</h2>
-    <form method="POST" action="/settings">
-      <div class="settings-grid">
-        <label>Probe interval (s)</label>
-          <input name="probe_interval" type="number" value="{{ settings.probe_interval }}">
-        <label>Ping count</label>
-          <input name="ping_count" type="number" value="{{ settings.ping_count }}">
-        <label>iperf3 duration (s)</label>
-          <input name="iperf3_duration" type="number" value="{{ settings.iperf3_duration }}">
-        <label>iperf3 port</label>
-          <input name="iperf3_port" type="number" value="{{ settings.iperf3_port }}">
-      </div>
-      <h3 style="font-size:0.95rem; color:var(--text-dim); margin:14px 0 10px;">Thresholds</h3>
-      <div class="settings-grid">
-        <label>Ping warn (ms)</label>
-          <input name="ping_warn_ms" type="number" value="{{ thresholds.get('ping_warn_ms', 100) }}">
-        <label>Ping crit (ms)</label>
-          <input name="ping_crit_ms" type="number" value="{{ thresholds.get('ping_crit_ms', 300) }}">
-        <label>Loss warn (%)</label>
-          <input name="loss_warn_pct" type="number" value="{{ thresholds.get('loss_warn_pct', 1) }}">
-        <label>Loss crit (%)</label>
-          <input name="loss_crit_pct" type="number" value="{{ thresholds.get('loss_crit_pct', 5) }}">
-        <label>TCP warn (ms)</label>
-          <input name="tcp_warn_ms" type="number" value="{{ thresholds.get('tcp_warn_ms', 150) }}">
-        <label>TCP crit (ms)</label>
-          <input name="tcp_crit_ms" type="number" value="{{ thresholds.get('tcp_crit_ms', 500) }}">
-        <label>BW warn (Mbps)</label>
-          <input name="bw_warn_mbps" type="number" value="{{ thresholds.get('bw_warn_mbps', 50) }}">
-        <label>BW crit (Mbps)</label>
-          <input name="bw_crit_mbps" type="number" value="{{ thresholds.get('bw_crit_mbps', 10) }}">
-      </div>
-      <br>
-      <button type="submit" class="btn btn-primary">Save Settings</button>
-      <button type="button" class="btn btn-secondary" onclick="closeModal('modal-settings')" style="margin-left:8px">Cancel</button>
-    </form>
-  </div>
+    <div class="modal">
+        <button class="modal-close" onclick="closeModal('modal-settings')">✕</button>
+        <h2>Settings</h2>
+        <form method="POST" action="/settings">
+            <div class="settings-grid">
+                <label>Probe interval (s)</label>
+                    <input name="probe_interval" type="number" value="{{ settings.probe_interval }}">
+                <label>Ping count</label>
+                    <input name="ping_count" type="number" value="{{ settings.ping_count }}">
+                <label>iperf3 duration (s)</label>
+                    <input name="iperf3_duration" type="number" value="{{ settings.iperf3_duration }}">
+                <label>iperf3 port</label>
+                    <input name="iperf3_port" type="number" value="{{ settings.iperf3_port }}">
+            </div>
+            <h3 style="font-size:0.95rem; color:var(--text-dim); margin:14px 0 10px;">Thresholds</h3>
+            <div class="settings-grid">
+                <label>Ping warn (ms)</label>
+                    <input name="ping_warn_ms" type="number" value="{{ thresholds.get('ping_warn_ms', 100) }}">
+                <label>Ping crit (ms)</label>
+                    <input name="ping_crit_ms" type="number" value="{{ thresholds.get('ping_crit_ms', 300) }}">
+                <label>Loss warn (%)</label>
+                    <input name="loss_warn_pct" type="number" value="{{ thresholds.get('loss_warn_pct', 1) }}">
+                <label>Loss crit (%)</label>
+                    <input name="loss_crit_pct" type="number" value="{{ thresholds.get('loss_crit_pct', 5) }}">
+                <label>TCP warn (ms)</label>
+                    <input name="tcp_warn_ms" type="number" value="{{ thresholds.get('tcp_warn_ms', 150) }}">
+                <label>TCP crit (ms)</label>
+                    <input name="tcp_crit_ms" type="number" value="{{ thresholds.get('tcp_crit_ms', 500) }}">
+                <label>BW warn (Mbps)</label>
+                    <input name="bw_warn_mbps" type="number" value="{{ thresholds.get('bw_warn_mbps', 50) }}">
+                <label>BW crit (Mbps)</label>
+                    <input name="bw_crit_mbps" type="number" value="{{ thresholds.get('bw_crit_mbps', 10) }}">
+            </div>
+            <br>
+            <button type="submit" class="btn btn-primary">Save Settings</button>
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-settings')" style="margin-left:8px">Cancel</button>
+        </form>
+    </div>
 </div>
 
 <script>
 // ── Chart state ───────────────────────────────────────────────────────────────
 const ZOOM_LEVELS = [
-  // label = tick interval; window = 10 ticks × tickMs
-  { label: '10m', tickMs:        600_000, windowMs:        6_000_000, tickUnit: 'minute', stepSize: 10 },
-  { label: '1h',  tickMs:      3_600_000, windowMs:       36_000_000, tickUnit: 'hour',   stepSize: 1  },
-  { label: '12h', tickMs:     43_200_000, windowMs:      432_000_000, tickUnit: 'hour',   stepSize: 12 },
-  { label: '1d',  tickMs:     86_400_000, windowMs:      864_000_000, tickUnit: 'day',    stepSize: 1  },
-  { label: '7d',  tickMs:    604_800_000, windowMs:    6_048_000_000, tickUnit: 'day',    stepSize: 7  },
-  { label: '1mo', tickMs:  2_592_000_000, windowMs:   25_920_000_000, tickUnit: 'month',  stepSize: 1  },
+    // label = tick interval; window = 10 ticks × tickMs
+    { label: '10m', tickMs:        600_000, windowMs:        6_000_000, tickUnit: 'minute', stepSize: 10 },
+    { label: '1h',  tickMs:      3_600_000, windowMs:       36_000_000, tickUnit: 'hour',   stepSize: 1  },
+    { label: '12h', tickMs:     43_200_000, windowMs:      432_000_000, tickUnit: 'hour',   stepSize: 12 },
+    { label: '1d',  tickMs:     86_400_000, windowMs:      864_000_000, tickUnit: 'day',    stepSize: 1  },
+    { label: '7d',  tickMs:    604_800_000, windowMs:    6_048_000_000, tickUnit: 'day',    stepSize: 7  },
+    { label: '1mo', tickMs:  2_592_000_000, windowMs:   25_920_000_000, tickUnit: 'month',  stepSize: 1  },
 ];
 let _charts    = {};   // keyed by tab name
 let _chartHost = null;
@@ -421,52 +421,52 @@ const PROBE_INTERVAL_MS = {{ (settings.probe_interval | default(30)) * 1000 }};
 const GAP_THRESHOLD_MS = PROBE_INTERVAL_MS * 2;
 
 function escAttr(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // Round a timestamp DOWN to the nearest tick boundary (local time)
 function tickFloor(ms, zl) {
-  const d = new Date(ms);
-  switch (zl.tickUnit) {
-    case 'minute':
-      return new Date(d.getFullYear(), d.getMonth(), d.getDate(),
-                      d.getHours(),
-                      Math.floor(d.getMinutes() / zl.stepSize) * zl.stepSize).getTime();
-    case 'hour':
-      return new Date(d.getFullYear(), d.getMonth(), d.getDate(),
-                      Math.floor(d.getHours() / zl.stepSize) * zl.stepSize).getTime();
-    case 'day':
-      return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-    case 'month':
-      return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
-    default:
-      return ms;
-  }
+    const d = new Date(ms);
+    switch (zl.tickUnit) {
+        case 'minute':
+            return new Date(d.getFullYear(), d.getMonth(), d.getDate(),
+                                            d.getHours(),
+                                            Math.floor(d.getMinutes() / zl.stepSize) * zl.stepSize).getTime();
+        case 'hour':
+            return new Date(d.getFullYear(), d.getMonth(), d.getDate(),
+                                            Math.floor(d.getHours() / zl.stepSize) * zl.stepSize).getTime();
+        case 'day':
+            return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        case 'month':
+            return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+        default:
+            return ms;
+    }
 }
 
 // Round a timestamp UP to the next tick boundary (local time)
 function tickCeil(ms, zl) {
-  const f = tickFloor(ms, zl);
-  if (f >= ms) return f;  // already on a boundary
-  if (zl.tickUnit === 'month') {
-    const d = new Date(f);
-    return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
-  }
-  return f + zl.tickMs;
+    const f = tickFloor(ms, zl);
+    if (f >= ms) return f;  // already on a boundary
+    if (zl.tickUnit === 'month') {
+        const d = new Date(f);
+        return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
+    }
+    return f + zl.tickMs;
 }
 
 function addMonths(ms, months) {
-  const d = new Date(ms);
-  const targetMonthStart = new Date(d.getFullYear(), d.getMonth() + months, 1);
-  const lastDay = new Date(targetMonthStart.getFullYear(), targetMonthStart.getMonth() + 1, 0).getDate();
-  return new Date(targetMonthStart.getFullYear(), targetMonthStart.getMonth(), Math.min(d.getDate(), lastDay),
-                  d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()).getTime();
+    const d = new Date(ms);
+    const targetMonthStart = new Date(d.getFullYear(), d.getMonth() + months, 1);
+    const lastDay = new Date(targetMonthStart.getFullYear(), targetMonthStart.getMonth() + 1, 0).getDate();
+    return new Date(targetMonthStart.getFullYear(), targetMonthStart.getMonth(), Math.min(d.getDate(), lastDay),
+                                    d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()).getTime();
 }
 
 function monthWindowForEnd(endMs) {
-  const end = new Date(endMs);
-  const start = new Date(end.getFullYear(), end.getMonth() - 9, 1);
-  return { winStart: start.getTime(), winEnd: endMs };
+    const end = new Date(endMs);
+    const start = new Date(end.getFullYear(), end.getMonth() - 9, 1);
+    return { winStart: start.getTime(), winEnd: endMs };
 }
 
 // (clock removed)
@@ -475,47 +475,47 @@ function monthWindowForEnd(endMs) {
 // Version check: prefer checksum and show server start time
 let _currentChecksum = null;
 function checkVersion() {
-  fetch('/api/version')
-    .then(r => r.json())
-    .then(d => {
-      const c = d.checksum || null;
-      const start = d.server_start || null;
-      if (_currentChecksum === null) {
-        // First load: record checksum and display it with server start time
-        _currentChecksum = c;
-        const el = document.getElementById('app-version');
-        if (el) {
-          let text = 'v ' + (c ? c.slice(0, 8) : (d.version || 'dev'));
-          if (start) {
-            try {
-              const dt = new Date(start);
-              text += ' · started ' + dt.toLocaleString();
-            } catch (e) {
-              text += ' · started ' + start;
+    fetch('/api/version')
+        .then(r => r.json())
+        .then(d => {
+            const c = d.checksum || null;
+            const start = d.server_start || null;
+            if (_currentChecksum === null) {
+                // First load: record checksum and display it with server start time
+                _currentChecksum = c;
+                const el = document.getElementById('app-version');
+                if (el) {
+                    let text = 'v ' + (c ? c.slice(0, 8) : (d.version || 'dev'));
+                    if (start) {
+                        try {
+                            const dt = new Date(start);
+                            text += ' · started ' + dt.toLocaleString();
+                        } catch (e) {
+                            text += ' · started ' + start;
+                        }
+                    }
+                    el.textContent = text;
+                }
+            } else {
+                // Detect checksum change (preferred)
+                if (c && _currentChecksum && c !== _currentChecksum) {
+                    const banner = document.getElementById('stale-banner');
+                    if (banner) {
+                        banner.textContent = '⚠ New code deployed (checksum ' + c.slice(0,8) + '). Click to reload.';
+                        banner.style.display = 'block';
+                    }
+                }
             }
-          }
-          el.textContent = text;
-        }
-      } else {
-        // Detect checksum change (preferred)
-        if (c && _currentChecksum && c !== _currentChecksum) {
-          const banner = document.getElementById('stale-banner');
-          if (banner) {
-            banner.textContent = '⚠ New code deployed (checksum ' + c.slice(0,8) + '). Click to reload.';
-            banner.style.display = 'block';
-          }
-        }
-      }
-    })
-    .catch(() => {});
+        })
+        .catch(() => {});
 }
 checkVersion();
 setInterval(checkVersion, 30_000);
 
 // ── Inline edit toggle ────────────────────────────────────────────────────────
 function toggleEdit(idx) {
-  event.stopPropagation();
-  document.getElementById('edit-' + idx).classList.toggle('active');
+    event.stopPropagation();
+    document.getElementById('edit-' + idx).classList.toggle('active');
 }
 
 // ── Modal helpers ─────────────────────────────────────────────────────────────
@@ -523,75 +523,75 @@ function openModal(id)  { document.getElementById(id).classList.add('active'); }
 function closeModal(id) { document.getElementById(id).classList.remove('active'); }
 function closeModalIfBg(e, id) { if (e.target === e.currentTarget) closeModal(id); }
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape')
-    document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+    if (e.key === 'Escape')
+        document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
 });
 
 // ── iperf3 manual trigger ─────────────────────────────────────────────────────
 function triggerIperf3(idx) {
-  const btn = document.getElementById('run-' + idx);
-  if (!btn || btn.classList.contains('running')) return;
-  btn.classList.add('running');
-  btn.disabled = true;
-  fetch('/hosts/' + idx + '/trigger-iperf3', { method: 'POST' })
-    .then(r => r.json())
-    .then(() => { setTimeout(() => { btn.classList.remove('running'); btn.disabled = false; }, 3000); })
-    .catch(()  => { btn.classList.remove('running'); btn.disabled = false; });
+    const btn = document.getElementById('run-' + idx);
+    if (!btn || btn.classList.contains('running')) return;
+    btn.classList.add('running');
+    btn.disabled = true;
+    fetch('/hosts/' + idx + '/trigger-iperf3', { method: 'POST' })
+        .then(r => r.json())
+        .then(() => { setTimeout(() => { btn.classList.remove('running'); btn.disabled = false; }, 3000); })
+        .catch(()  => { btn.classList.remove('running'); btn.disabled = false; });
 }
 
 // ── History chart ─────────────────────────────────────────────────────────────
 function _ts(r) { return r.ts.endsWith('Z') ? r.ts : r.ts + 'Z'; }
 
 function aggregateSeries(rows, winStart, winEnd, buckets) {
-  const bucketMs = (winEnd - winStart) / buckets;
-  const agg = Array.from({ length: buckets }, (_, i) => ({
-    t: winStart + (i + 0.5) * bucketMs, sums: {}, counts: {}, count: 0,
-    firstTs: null, lastTs: null,
-  }));
-  const FIELDS = ['avg','min','max','jitter','loss','p95','rtt','download_mbps','upload_mbps'];
-  for (const row of rows) {
-    const t = new Date(_ts(row)).getTime();
-    if (t < winStart || t > winEnd) continue;
-    const bi = Math.min(Math.floor((t - winStart) / bucketMs), buckets - 1);
-    if (agg[bi].firstTs == null || t < agg[bi].firstTs) agg[bi].firstTs = t;
-    if (agg[bi].lastTs  == null || t > agg[bi].lastTs)  agg[bi].lastTs  = t;
-    for (const f of FIELDS) {
-      if (row[f] != null) {
-        agg[bi].sums[f]   = (agg[bi].sums[f]   || 0) + row[f];
-        agg[bi].counts[f] = (agg[bi].counts[f]  || 0) + 1;
-      }
+    const bucketMs = (winEnd - winStart) / buckets;
+    const agg = Array.from({ length: buckets }, (_, i) => ({
+        t: winStart + (i + 0.5) * bucketMs, sums: {}, counts: {}, count: 0,
+        firstTs: null, lastTs: null,
+    }));
+    const FIELDS = ['avg','min','max','jitter','loss','p95','rtt','download_mbps','upload_mbps'];
+    for (const row of rows) {
+        const t = new Date(_ts(row)).getTime();
+        if (t < winStart || t > winEnd) continue;
+        const bi = Math.min(Math.floor((t - winStart) / bucketMs), buckets - 1);
+        if (agg[bi].firstTs == null || t < agg[bi].firstTs) agg[bi].firstTs = t;
+        if (agg[bi].lastTs  == null || t > agg[bi].lastTs)  agg[bi].lastTs  = t;
+        for (const f of FIELDS) {
+            if (row[f] != null) {
+                agg[bi].sums[f]   = (agg[bi].sums[f]   || 0) + row[f];
+                agg[bi].counts[f] = (agg[bi].counts[f]  || 0) + 1;
+            }
+        }
+        agg[bi].count++;
     }
-    agg[bi].count++;
-  }
-  return agg.filter(b => b.count > 0).map(b => {
-    const r = {
-      ts: new Date(b.t).toISOString(),
-      firstTs: new Date(b.firstTs).toISOString(),
-      lastTs: new Date(b.lastTs).toISOString(),
-      success: true,
-    };
-    for (const [f, s] of Object.entries(b.sums)) r[f] = s / b.counts[f];
-    return r;
-  });
+    return agg.filter(b => b.count > 0).map(b => {
+        const r = {
+            ts: new Date(b.t).toISOString(),
+            firstTs: new Date(b.firstTs).toISOString(),
+            lastTs: new Date(b.lastTs).toISOString(),
+            success: true,
+        };
+        for (const [f, s] of Object.entries(b.sums)) r[f] = s / b.counts[f];
+        return r;
+    });
 }
 
 function currentTab() {
-  return 'latency'; // kept for any legacy callers; tabs removed
+    return 'latency'; // kept for any legacy callers; tabs removed
 }
 
 function selectHost(name, idx) {
-  _selectedHost = name;
-  _selectedIdx  = idx;
-  document.querySelectorAll('#host-rows tr.data-row').forEach(r => r.classList.remove('selected'));
-  const row = document.getElementById('row-' + idx);
-  if (row) row.classList.add('selected');
-  document.getElementById('chart-host-name').textContent = name;
-  document.getElementById('chart-section').style.display = 'block';
-  fetchAndRender(name);
+    _selectedHost = name;
+    _selectedIdx  = idx;
+    document.querySelectorAll('#host-rows tr.data-row').forEach(r => r.classList.remove('selected'));
+    const row = document.getElementById('row-' + idx);
+    if (row) row.classList.add('selected');
+    document.getElementById('chart-host-name').textContent = name;
+    document.getElementById('chart-section').style.display = 'block';
+    fetchAndRender(name);
 }
 
 function switchChartTab(tab) {
-  // no-op: tabs removed, all charts shown simultaneously
+    // no-op: tabs removed, all charts shown simultaneously
 }
 
 function zoomIn()  { if (_zoomIdx > 0)                    { _zoomIdx--; _applyZoom(); } }
@@ -599,194 +599,194 @@ function zoomOut() { if (_zoomIdx < ZOOM_LEVELS.length-1) { _zoomIdx++; _applyZo
 function setZoomLevel(i) { _zoomIdx = i; _applyZoom(); }
 function setLive()   { _windowEnd = null; _applyZoom(); }
 function panLeft()   {
-  const zl = ZOOM_LEVELS[_zoomIdx];
-  _windowEnd = zl.tickUnit === 'month'
-    ? addMonths(_windowEnd || Date.now(), -10)
-    : (_windowEnd || Date.now()) - zl.windowMs;
-  _applyZoom();
+    const zl = ZOOM_LEVELS[_zoomIdx];
+    _windowEnd = zl.tickUnit === 'month'
+        ? addMonths(_windowEnd || Date.now(), -10)
+        : (_windowEnd || Date.now()) - zl.windowMs;
+    _applyZoom();
 }
 function panRight()  {
-  const zl = ZOOM_LEVELS[_zoomIdx];
-  const end = zl.tickUnit === 'month'
-    ? addMonths(_windowEnd || Date.now(), 10)
-    : (_windowEnd || Date.now()) + zl.windowMs;
-  _windowEnd = end >= Date.now() - 5000 ? null : end;
-  _applyZoom();
+    const zl = ZOOM_LEVELS[_zoomIdx];
+    const end = zl.tickUnit === 'month'
+        ? addMonths(_windowEnd || Date.now(), 10)
+        : (_windowEnd || Date.now()) + zl.windowMs;
+    _windowEnd = end >= Date.now() - 5000 ? null : end;
+    _applyZoom();
 }
 function _applyZoom() { if (_selectedHost) fetchAndRender(_selectedHost); }
 
 function fetchAndRender(name) {
-  const zl     = ZOOM_LEVELS[_zoomIdx];
-  const liveEnd = _windowEnd || Date.now();
-  // Month scale uses calendar months: ticks start on the 1st, range ends at the selected/live time.
-  const { winStart, winEnd } = zl.tickUnit === 'month'
-    ? monthWindowForEnd(liveEnd)
-    : { winStart: tickCeil(liveEnd, zl) - zl.windowMs, winEnd: tickCeil(liveEnd, zl) };
-  // Request rows covering the window; cap at 50k to protect the server
-  const limit    = Math.min(Math.ceil((winEnd - winStart) / Math.max(PROBE_INTERVAL_MS, 1000)) + 200, 50000);
-  const since    = new Date(winStart).toISOString().slice(0, 19); // naive UTC prefix
-  const until    = new Date(winEnd).toISOString().slice(0, 19);   // naive UTC prefix
-  fetch('/api/history/' + encodeURIComponent(name) +
-        '?since=' + encodeURIComponent(since) + '&until=' + encodeURIComponent(until) + '&limit=' + limit)
-    .then(r => r.json())
-    .then(data => {
-      ['latency', 'bandwidth', 'loss'].forEach(tab => renderChart(name, tab, data, winStart, winEnd));
-      updateZoomControls(winStart, winEnd);
-    })
-    .catch(() => {});
+    const zl     = ZOOM_LEVELS[_zoomIdx];
+    const liveEnd = _windowEnd || Date.now();
+    // Month scale uses calendar months: ticks start on the 1st, range ends at the selected/live time.
+    const { winStart, winEnd } = zl.tickUnit === 'month'
+        ? monthWindowForEnd(liveEnd)
+        : { winStart: tickCeil(liveEnd, zl) - zl.windowMs, winEnd: tickCeil(liveEnd, zl) };
+    // Request rows covering the window; cap at 50k to protect the server
+    const limit    = Math.min(Math.ceil((winEnd - winStart) / Math.max(PROBE_INTERVAL_MS, 1000)) + 200, 50000);
+    const since    = new Date(winStart).toISOString().slice(0, 19); // naive UTC prefix
+    const until    = new Date(winEnd).toISOString().slice(0, 19);   // naive UTC prefix
+    fetch('/api/history/' + encodeURIComponent(name) +
+                '?since=' + encodeURIComponent(since) + '&until=' + encodeURIComponent(until) + '&limit=' + limit)
+        .then(r => r.json())
+        .then(data => {
+            ['latency', 'bandwidth', 'loss'].forEach(tab => renderChart(name, tab, data, winStart, winEnd));
+            updateZoomControls(winStart, winEnd);
+        })
+        .catch(() => {});
 }
 
 function updateZoomControls(winStart, winEnd) {
-  document.querySelectorAll('.zoom-level-btn').forEach((b, i) =>
-    b.classList.toggle('active', i === _zoomIdx));
-  const liveBtn = document.getElementById('btn-live');
-  if (liveBtn) liveBtn.classList.toggle('paused', _windowEnd !== null);
-  const zl = ZOOM_LEVELS[_zoomIdx];
-  const fmtDate = ms => {
-    const d = new Date(ms);
-    const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    if (zl.windowMs >= 86_400_000) return date + ' ' + d.getFullYear();
-    return date + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
-  };
-  const el = document.getElementById('chart-range-label');
-  if (el) el.textContent = fmtDate(winStart) + ' \u2013 ' + fmtDate(winEnd);
+    document.querySelectorAll('.zoom-level-btn').forEach((b, i) =>
+        b.classList.toggle('active', i === _zoomIdx));
+    const liveBtn = document.getElementById('btn-live');
+    if (liveBtn) liveBtn.classList.toggle('paused', _windowEnd !== null);
+    const zl = ZOOM_LEVELS[_zoomIdx];
+    const fmtDate = ms => {
+        const d = new Date(ms);
+        const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        if (zl.windowMs >= 86_400_000) return date + ' ' + d.getFullYear();
+        return date + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+    };
+    const el = document.getElementById('chart-range-label');
+    if (el) el.textContent = fmtDate(winStart) + ' \u2013 ' + fmtDate(winEnd);
 }
 
 function xAxisDisplayFormats(zl) {
-  return {
-    minute: 'HH:mm',
-    hour: zl.label === '12h' ? 'MMM d HH:mm' : 'HH:mm',
-    day: 'MMM d',
-    month: 'MMM yyyy',
-  };
+    return {
+        minute: 'HH:mm',
+        hour: zl.label === '12h' ? 'MMM d HH:mm' : 'HH:mm',
+        day: 'MMM d',
+        month: 'MMM yyyy',
+    };
 }
 
 function xAxisTickCallback(zl) {
-  if (zl.label !== '12h') return undefined;
-  return value => {
-    const d = new Date(value);
-    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
-  };
+    if (zl.label !== '12h') return undefined;
+    return value => {
+        const d = new Date(value);
+        return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+    };
 }
 
 function xAxisTicks(zl, color) {
-  const ticks = { color, stepSize: zl.stepSize };
-  const callback = xAxisTickCallback(zl);
-  if (callback) ticks.callback = callback;
-  return ticks;
+    const ticks = { color, stepSize: zl.stepSize };
+    const callback = xAxisTickCallback(zl);
+    if (callback) ticks.callback = callback;
+    return ticks;
 }
 
 function fmtNum(v) {
-  // ≤2 decimal places, trailing zeros stripped, thousands separator
-  const r = Math.round(v * 100) / 100;
-  const s = r.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-  return s;
+    // ≤2 decimal places, trailing zeros stripped, thousands separator
+    const r = Math.round(v * 100) / 100;
+    const s = r.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    return s;
 }
 
 function fmtDur(ms) {
-  // Mirrors formatting.fmt_duration in Python
-  if (ms == null) return '—';
-  if (ms < 0.001)   return fmtNum(ms * 1_000_000) + ' ns';
-  if (ms < 1)       return fmtNum(ms * 1_000) + ' \u03bcs';
-  if (ms < 1_000)   return fmtNum(ms) + ' ms';
-  if (ms < 60_000)  return fmtNum(ms / 1_000) + ' s';
-  const totalSec = Math.round(ms / 1_000);
-  const sec = totalSec % 60;
-  const totalMin = Math.floor(totalSec / 60);
-  const min = totalMin % 60;
-  const totalHr = Math.floor(totalMin / 60);
-  const pad2 = n => String(n).padStart(2, '0');
-  if (ms < 86_400_000) return `${pad2(totalHr)}:${pad2(min)}:${pad2(sec)}`;
-  const day = Math.floor(totalHr / 24);
-  const hr  = totalHr % 24;
-  const fmtHms = `${pad2(hr)}:${pad2(min)}:${pad2(sec)}`;
-  if (ms < 365 * 86_400_000) return `${day.toLocaleString('en-US')} d ${fmtHms}`;
-  const yr  = Math.floor(day / 365);
-  const rem = day % 365;
-  return `${yr.toLocaleString('en-US')} y ${rem.toLocaleString('en-US')} d ${fmtHms}`;
+    // Mirrors formatting.fmt_duration in Python
+    if (ms == null) return '—';
+    if (ms < 0.001)   return fmtNum(ms * 1_000_000) + ' ns';
+    if (ms < 1)       return fmtNum(ms * 1_000) + ' \u03bcs';
+    if (ms < 1_000)   return fmtNum(ms) + ' ms';
+    if (ms < 60_000)  return fmtNum(ms / 1_000) + ' s';
+    const totalSec = Math.round(ms / 1_000);
+    const sec = totalSec % 60;
+    const totalMin = Math.floor(totalSec / 60);
+    const min = totalMin % 60;
+    const totalHr = Math.floor(totalMin / 60);
+    const pad2 = n => String(n).padStart(2, '0');
+    if (ms < 86_400_000) return `${pad2(totalHr)}:${pad2(min)}:${pad2(sec)}`;
+    const day = Math.floor(totalHr / 24);
+    const hr  = totalHr % 24;
+    const fmtHms = `${pad2(hr)}:${pad2(min)}:${pad2(sec)}`;
+    if (ms < 365 * 86_400_000) return `${day.toLocaleString('en-US')} d ${fmtHms}`;
+    const yr  = Math.floor(day / 365);
+    const rem = day % 365;
+    return `${yr.toLocaleString('en-US')} y ${rem.toLocaleString('en-US')} d ${fmtHms}`;
 }
 
 // Legacy alias used by chart tooltip
 function fmtMs(v) { return fmtDur(v); }
 
 function isLargeProbeGap(ctx) {
-  return !!(ctx.p1 && ctx.p1.raw && ctx.p1.raw.gapFromPrev);
+    return !!(ctx.p1 && ctx.p1.raw && ctx.p1.raw.gapFromPrev);
 }
 
 function sampleStartMs(row) {
-  return new Date(row.firstTs || _ts(row)).getTime();
+    return new Date(row.firstTs || _ts(row)).getTime();
 }
 
 function sampleEndMs(row) {
-  return new Date(row.lastTs || _ts(row)).getTime();
+    return new Date(row.lastTs || _ts(row)).getTime();
 }
 
 function pointsWithGaps(rows, valueFn) {
-  let prevEnd = null;
-  return rows.map(row => {
-    const start = sampleStartMs(row);
-    const end = sampleEndMs(row);
-    const pt = {
-      x: _ts(row),
-      y: valueFn(row),
-      gapFromPrev: prevEnd != null && start - prevEnd > GAP_THRESHOLD_MS,
-    };
-    prevEnd = end;
-    return pt;
-  });
+    let prevEnd = null;
+    return rows.map(row => {
+        const start = sampleStartMs(row);
+        const end = sampleEndMs(row);
+        const pt = {
+            x: _ts(row),
+            y: valueFn(row),
+            gapFromPrev: prevEnd != null && start - prevEnd > GAP_THRESHOLD_MS,
+        };
+        prevEnd = end;
+        return pt;
+    });
 }
 
 function lineDataset({ metricId, label, data, borderColor, backgroundColor, yAxisID = 'y', fill = false }) {
-  return {
-    metricId,
-    label,
-    data,
-    borderColor,
-    backgroundColor,
-    fill,
-    pointRadius: 0,
-    tension: 0.3,
-    spanGaps: true,
-    yAxisID,
-    segment: {
-      borderColor: ctx => isLargeProbeGap(ctx) ? 'rgba(139,148,158,0.45)' : borderColor,
-      borderWidth: ctx => isLargeProbeGap(ctx) ? 1 : 2,
-    },
-  };
+    return {
+        metricId,
+        label,
+        data,
+        borderColor,
+        backgroundColor,
+        fill,
+        pointRadius: 0,
+        tension: 0.3,
+        spanGaps: true,
+        yAxisID,
+        segment: {
+            borderColor: ctx => isLargeProbeGap(ctx) ? 'rgba(139,148,158,0.45)' : borderColor,
+            borderWidth: ctx => isLargeProbeGap(ctx) ? 1 : 2,
+        },
+    };
 }
 
 function failureLegendDataset(count, winStart) {
-  return {
-    metricId: 'tcp-failures',
-    label: 'TCP RTT failures: ' + count,
-    data: [{ x: new Date(winStart).toISOString(), y: null }],
-    borderColor: '#f85149',
-    backgroundColor: 'rgba(0,0,0,0)',
-    pointRadius: 0,
-    hidden: !_tcpFailuresWanted,
-  };
+    return {
+        metricId: 'tcp-failures',
+        label: 'TCP RTT failures: ' + count,
+        data: [{ x: new Date(winStart).toISOString(), y: null }],
+        borderColor: '#f85149',
+        backgroundColor: 'rgba(0,0,0,0)',
+        pointRadius: 0,
+        hidden: !_tcpFailuresWanted,
+    };
 }
 
 function isMetricVisible(chart, metricId) {
-  const idx = chart.data.datasets.findIndex(ds => ds.metricId === metricId);
-  return idx >= 0 && chart.isDatasetVisible(idx);
+    const idx = chart.data.datasets.findIndex(ds => ds.metricId === metricId);
+    return idx >= 0 && chart.isDatasetVisible(idx);
 }
 
 // Custom tooltip positioner: anchors tooltip to cursor position to prevent drift
 Chart.Tooltip.positioners.cursor = function(_elements, eventPosition) {
-  return { x: eventPosition.x, y: eventPosition.y };
+    return { x: eventPosition.x, y: eventPosition.y };
 };
 
 // Global plugin: suppress tooltip when the hovered x position has no real data
 // (prevents the tooltip from showing in gaps or empty regions of the chart)
 Chart.register({
-  id: 'tooltipNearDataOnly',
-  beforeTooltipDraw(chart, args) {
-    const tp = args.tooltip;
-    if (!tp || !tp.dataPoints) return;
-    const hasValid = tp.dataPoints.some(p => p.parsed.y != null);
-    if (!hasValid) args.cancel = true;
-  }
+    id: 'tooltipNearDataOnly',
+    beforeTooltipDraw(chart, args) {
+        const tp = args.tooltip;
+        if (!tp || !tp.dataPoints) return;
+        const hasValid = tp.dataPoints.some(p => p.parsed.y != null);
+        if (!hasValid) args.cancel = true;
+    }
 });
 
 // Plugin: draw TCP RTT failure crosses on the TCP RTT line.
@@ -794,317 +794,317 @@ Chart.register({
 // between the two surrounding successful data points.
 // NOTE: uses afterDatasetsDraw so crosses appear beneath the tooltip overlay.
 Chart.register({
-  id: 'tcpFailMarkers',
-  afterDatasetsDraw(chart) {
-    if (chart.canvas.id !== 'history-chart-latency') return;
-    if (!_tcpFailed || !_tcpFailed.length) return;
-    const tcpDsIdx = chart.data.datasets.findIndex(ds => ds.metricId === 'tcp-rtt');
-    if (tcpDsIdx < 0) return;
-    if (!chart.isDatasetVisible(tcpDsIdx)) return;
-    if (!_tcpFailuresWanted || !isMetricVisible(chart, 'tcp-failures')) return;
+    id: 'tcpFailMarkers',
+    afterDatasetsDraw(chart) {
+        if (chart.canvas.id !== 'history-chart-latency') return;
+        if (!_tcpFailed || !_tcpFailed.length) return;
+        const tcpDsIdx = chart.data.datasets.findIndex(ds => ds.metricId === 'tcp-rtt');
+        if (tcpDsIdx < 0) return;
+        if (!chart.isDatasetVisible(tcpDsIdx)) return;
+        if (!_tcpFailuresWanted || !isMetricVisible(chart, 'tcp-failures')) return;
 
-    // Collect successful TCP RTT points in ascending time order
-    const rawData = chart.data.datasets[tcpDsIdx].data;
-    const okPts = [];
-    for (const pt of rawData) {
-      if (pt.y != null && isFinite(pt.y))
-        okPts.push({ t: new Date(pt.x).getTime(), rtt: pt.y });
+        // Collect successful TCP RTT points in ascending time order
+        const rawData = chart.data.datasets[tcpDsIdx].data;
+        const okPts = [];
+        for (const pt of rawData) {
+            if (pt.y != null && isFinite(pt.y))
+                okPts.push({ t: new Date(pt.x).getTime(), rtt: pt.y });
+        }
+        if (!okPts.length) return;
+
+        const xScale = chart.scales.x, yScale = chart.scales.y;
+        if (!xScale || !yScale) return;
+        const { left, right, top, bottom } = chart.chartArea;
+        const ctx = chart.ctx;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(left, top, right - left, bottom - top);
+        ctx.clip();
+        ctx.strokeStyle = '#f85149';
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+
+        for (const failed of _tcpFailed) {
+            const tf = new Date(_ts(failed)).getTime();
+            const cx = xScale.getPixelForValue(tf);
+            if (!isFinite(cx) || cx < left || cx > right) continue;
+
+            // Linearly interpolate RTT at tf between the two surrounding success points
+            const idx = okPts.findIndex(p => p.t >= tf);
+            let rttY;
+            if      (idx < 0)  rttY = okPts[okPts.length - 1].rtt;
+            else if (idx === 0) rttY = okPts[0].rtt;
+            else {
+                const p0 = okPts[idx - 1], p1 = okPts[idx];
+                rttY = p0.rtt + (p1.rtt - p0.rtt) * (tf - p0.t) / (p1.t - p0.t);
+            }
+            const cy = yScale.getPixelForValue(rttY);
+            if (!isFinite(cy) || cy < top || cy > bottom) continue;
+
+            const r = 2;
+            ctx.beginPath();
+            ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx + r, cy + r);
+            ctx.moveTo(cx + r, cy - r); ctx.lineTo(cx - r, cy + r);
+            ctx.stroke();
+        }
+        ctx.restore();
     }
-    if (!okPts.length) return;
-
-    const xScale = chart.scales.x, yScale = chart.scales.y;
-    if (!xScale || !yScale) return;
-    const { left, right, top, bottom } = chart.chartArea;
-    const ctx = chart.ctx;
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(left, top, right - left, bottom - top);
-    ctx.clip();
-    ctx.strokeStyle = '#f85149';
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = 'round';
-
-    for (const failed of _tcpFailed) {
-      const tf = new Date(_ts(failed)).getTime();
-      const cx = xScale.getPixelForValue(tf);
-      if (!isFinite(cx) || cx < left || cx > right) continue;
-
-      // Linearly interpolate RTT at tf between the two surrounding success points
-      const idx = okPts.findIndex(p => p.t >= tf);
-      let rttY;
-      if      (idx < 0)  rttY = okPts[okPts.length - 1].rtt;
-      else if (idx === 0) rttY = okPts[0].rtt;
-      else {
-        const p0 = okPts[idx - 1], p1 = okPts[idx];
-        rttY = p0.rtt + (p1.rtt - p0.rtt) * (tf - p0.t) / (p1.t - p0.t);
-      }
-      const cy = yScale.getPixelForValue(rttY);
-      if (!isFinite(cy) || cy < top || cy > bottom) continue;
-
-      const r = 2;
-      ctx.beginPath();
-      ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx + r, cy + r);
-      ctx.moveTo(cx + r, cy - r); ctx.lineTo(cx - r, cy + r);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
 });
 
 function renderChart(name, tab, data, winStart, winEnd) {
-  const CH = { bg: '#0d1117', surface: '#161b22', border: '#30363d',
-                text: '#c9d1d9', dim: '#8b949e', green: '#3fb950',
-                yellow: '#d29922', red: '#f85149', cyan: '#58a6ff' };
-  const zl = ZOOM_LEVELS[_zoomIdx];
+    const CH = { bg: '#0d1117', surface: '#161b22', border: '#30363d',
+                                text: '#c9d1d9', dim: '#8b949e', green: '#3fb950',
+                                yellow: '#d29922', red: '#f85149', cyan: '#58a6ff' };
+    const zl = ZOOM_LEVELS[_zoomIdx];
 
-  // Aggregate when density > 150 points (≈ zoomed out beyond 12–13 min at 5 s interval)
-  const aggregated = data.ping.length > 150;
+    // Aggregate when density > 150 points (≈ zoomed out beyond 12–13 min at 5 s interval)
+    const aggregated = data.ping.length > 150;
 
-  function prepRows(raw) {
-    const asc = [...raw].reverse().filter(r => {
-      const t = new Date(_ts(r)).getTime();
-      return t >= winStart && t <= winEnd;
-    });
-    return aggregated ? aggregateSeries(asc, winStart, winEnd, 100) : asc;
-  }
-
-  let datasets = [], yScales = {};
-
-  if (tab === 'latency') {
-    const ping = prepRows(data.ping);
-    const tcp  = prepRows(data.tcp);
-    // Raw failed TCP probes within the window — used for failure markers and tooltip
-    const tcpFailed = [...data.tcp].reverse().filter(r => {
-      const t = new Date(_ts(r)).getTime();
-      return t >= winStart && t <= winEnd && r.success === false;
-    });
-    _tcpFailed = tcpFailed;
-    _tcpFailedThreshold = aggregated ? (winEnd - winStart) / 200 : 20_000;
-    datasets = [
-      lineDataset({ metricId: 'ping-avg', label: 'Ping avg (ms)', data: pointsWithGaps(ping, r => r.success ? r.avg    : null), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)' }),
-      lineDataset({ metricId: 'jitter',   label: 'Jitter (ms)',   data: pointsWithGaps(ping, r => r.success ? r.jitter : null), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)' }),
-      lineDataset({ metricId: 'tcp-rtt',  label: 'TCP RTT (ms)', data: pointsWithGaps(tcp,  r => r.success ? r.rtt    : null), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)' }),
-      failureLegendDataset(tcpFailed.length, winStart),
-    ];
-    yScales = { y: { min: 0, title: { display: true, text: 'latency', color: CH.dim }, ticks: { color: CH.dim, callback: v => fmtMs(v) }, grid: { color: CH.border } } };
-
-  } else if (tab === 'bandwidth') {
-    const rows = prepRows(data.iperf3);
-    if (!rows.length) {
-      const bctx = document.getElementById('history-chart-bandwidth');
-      if (bctx) bctx.getContext('2d').clearRect(0, 0, 9999, 9999);
-      return;
+    function prepRows(raw) {
+        const asc = [...raw].reverse().filter(r => {
+            const t = new Date(_ts(r)).getTime();
+            return t >= winStart && t <= winEnd;
+        });
+        return aggregated ? aggregateSeries(asc, winStart, winEnd, 100) : asc;
     }
-    datasets = [
-      lineDataset({ metricId: 'download', label: '\u2193 Download (Mbps)', data: pointsWithGaps(rows, r => r.success ? r.download_mbps : null), borderColor: CH.green, backgroundColor: 'rgba(63,185,80,0.08)' }),
-      lineDataset({ metricId: 'upload',   label: '\u2191 Upload (Mbps)',   data: pointsWithGaps(rows, r => r.success ? r.upload_mbps   : null), borderColor: CH.cyan,  backgroundColor: 'rgba(88,166,255,0.08)' }),
-    ];
-    yScales = { y: { title: { display: true, text: 'Mbps', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
 
-  } else if (tab === 'loss') {
-    const rows = prepRows(data.ping);
-    datasets = [
-      lineDataset({ metricId: 'loss', label: 'Loss (%)', data: pointsWithGaps(rows, r => r.loss ?? null), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true }),
-    ];
-    yScales = { y: { min: 0, max: 100, title: { display: true, text: '%', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
-  }
+    let datasets = [], yScales = {};
 
-  const canvasEl = document.getElementById('history-chart-' + tab);
-  if (!canvasEl) return;
-  const ctx = canvasEl.getContext('2d');
+    if (tab === 'latency') {
+        const ping = prepRows(data.ping);
+        const tcp  = prepRows(data.tcp);
+        // Raw failed TCP probes within the window — used for failure markers and tooltip
+        const tcpFailed = [...data.tcp].reverse().filter(r => {
+            const t = new Date(_ts(r)).getTime();
+            return t >= winStart && t <= winEnd && r.success === false;
+        });
+        _tcpFailed = tcpFailed;
+        _tcpFailedThreshold = aggregated ? (winEnd - winStart) / 200 : 20_000;
+        datasets = [
+            lineDataset({ metricId: 'ping-avg', label: 'Ping avg (ms)', data: pointsWithGaps(ping, r => r.success ? r.avg    : null), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)' }),
+            lineDataset({ metricId: 'jitter',   label: 'Jitter (ms)',   data: pointsWithGaps(ping, r => r.success ? r.jitter : null), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)' }),
+            lineDataset({ metricId: 'tcp-rtt',  label: 'TCP RTT (ms)', data: pointsWithGaps(tcp,  r => r.success ? r.rtt    : null), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)' }),
+            failureLegendDataset(tcpFailed.length, winStart),
+        ];
+        yScales = { y: { min: 0, title: { display: true, text: 'latency', color: CH.dim }, ticks: { color: CH.dim, callback: v => fmtMs(v) }, grid: { color: CH.border } } };
 
-  // Same host+tab already displayed — update in place without animation
-  if (_charts[tab] && _chartHost === name) {
-    // Preserve legend toggle state across data reloads
-    const hiddenByKey = {};
-    _charts[tab].data.datasets.forEach((ds, i) => {
-      hiddenByKey[ds.metricId || ds.label] = !_charts[tab].isDatasetVisible(i);
-    });
-    if ('tcp-failures' in hiddenByKey && !hiddenByKey['tcp-rtt']) {
-      _tcpFailuresWanted = !hiddenByKey['tcp-failures'];
+    } else if (tab === 'bandwidth') {
+        const rows = prepRows(data.iperf3);
+        if (!rows.length) {
+            const bctx = document.getElementById('history-chart-bandwidth');
+            if (bctx) bctx.getContext('2d').clearRect(0, 0, 9999, 9999);
+            return;
+        }
+        datasets = [
+            lineDataset({ metricId: 'download', label: '\u2193 Download (Mbps)', data: pointsWithGaps(rows, r => r.success ? r.download_mbps : null), borderColor: CH.green, backgroundColor: 'rgba(63,185,80,0.08)' }),
+            lineDataset({ metricId: 'upload',   label: '\u2191 Upload (Mbps)',   data: pointsWithGaps(rows, r => r.success ? r.upload_mbps   : null), borderColor: CH.cyan,  backgroundColor: 'rgba(88,166,255,0.08)' }),
+        ];
+        yScales = { y: { title: { display: true, text: 'Mbps', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
+
+    } else if (tab === 'loss') {
+        const rows = prepRows(data.ping);
+        datasets = [
+            lineDataset({ metricId: 'loss', label: 'Loss (%)', data: pointsWithGaps(rows, r => r.loss ?? null), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true }),
+        ];
+        yScales = { y: { min: 0, max: 100, title: { display: true, text: '%', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
     }
-    datasets.forEach(ds => { if (hiddenByKey[ds.metricId || ds.label]) ds.hidden = true; });
-    const tcpHidden = !!hiddenByKey['tcp-rtt'];
-    datasets.forEach(ds => {
-      if (ds.metricId === 'tcp-failures' && tcpHidden) ds.hidden = true;
-    });
-    _charts[tab].data.datasets = datasets;
-    _charts[tab].options.scales.x.min = winStart;
-    _charts[tab].options.scales.x.max = winEnd;
-    _charts[tab].options.scales.x.time.unit = zl.tickUnit;
-    _charts[tab].options.scales.x.time.displayFormats = xAxisDisplayFormats(zl);
-    _charts[tab].options.scales.x.ticks = xAxisTicks(zl, CH.dim);
-    _charts[tab].options.plugins.tooltip.enabled = true;
-    _charts[tab].update('none');
-    return;
-  }
 
-  if (_charts[tab]) { _charts[tab].destroy(); _charts[tab] = null; }
-  _chartHost = name;
-  _charts[tab] = new Chart(ctx, {
-    type: 'line',
-    data: { datasets },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: {
-          labels: { color: CH.text, boxWidth: 12, padding: 16 },
-          onClick: (_evt, legendItem, legend) => {
-            const chart = legend.chart;
-            const idx = legendItem.datasetIndex;
-            const ds = chart.data.datasets[idx];
-            if (!ds) return;
+    const canvasEl = document.getElementById('history-chart-' + tab);
+    if (!canvasEl) return;
+    const ctx = canvasEl.getContext('2d');
 
-            if (ds.metricId === 'tcp-rtt') {
-              const nextVisible = !chart.isDatasetVisible(idx);
-              chart.setDatasetVisibility(idx, nextVisible);
-              const failIdx = chart.data.datasets.findIndex(d => d.metricId === 'tcp-failures');
-              if (failIdx >= 0) {
-                chart.setDatasetVisibility(
-                  failIdx,
-                  nextVisible && _tcpFailuresWanted
-                );
-              }
-            } else if (ds.metricId === 'tcp-failures') {
-              const tcpVisible = isMetricVisible(chart, 'tcp-rtt');
-              if (tcpVisible) _tcpFailuresWanted = !chart.isDatasetVisible(idx);
-              chart.setDatasetVisibility(idx, tcpVisible && _tcpFailuresWanted);
-            } else {
-              chart.setDatasetVisibility(idx, !chart.isDatasetVisible(idx));
-            }
-            chart.update();
-          },
-        },
-        tooltip: {
-          enabled: true,
-          position: 'cursor',
-          backgroundColor: CH.surface, borderColor: CH.border, borderWidth: 1,
-          titleColor: CH.text, bodyColor: CH.dim,
-          callbacks: tab === 'latency' ? {
-            label: ctx => {
-              const metric = ctx.dataset.metricId === 'tcp-rtt'
-                ? 'TCP RTT'
-                : ctx.dataset.label.split(' (')[0];
-              return metric + ': ' + fmtMs(ctx.parsed.y);
+    // Same host+tab already displayed — update in place without animation
+    if (_charts[tab] && _chartHost === name) {
+        // Preserve legend toggle state across data reloads
+        const hiddenByKey = {};
+        _charts[tab].data.datasets.forEach((ds, i) => {
+            hiddenByKey[ds.metricId || ds.label] = !_charts[tab].isDatasetVisible(i);
+        });
+        if ('tcp-failures' in hiddenByKey && !hiddenByKey['tcp-rtt']) {
+            _tcpFailuresWanted = !hiddenByKey['tcp-failures'];
+        }
+        datasets.forEach(ds => { if (hiddenByKey[ds.metricId || ds.label]) ds.hidden = true; });
+        const tcpHidden = !!hiddenByKey['tcp-rtt'];
+        datasets.forEach(ds => {
+            if (ds.metricId === 'tcp-failures' && tcpHidden) ds.hidden = true;
+        });
+        _charts[tab].data.datasets = datasets;
+        _charts[tab].options.scales.x.min = winStart;
+        _charts[tab].options.scales.x.max = winEnd;
+        _charts[tab].options.scales.x.time.unit = zl.tickUnit;
+        _charts[tab].options.scales.x.time.displayFormats = xAxisDisplayFormats(zl);
+        _charts[tab].options.scales.x.ticks = xAxisTicks(zl, CH.dim);
+        _charts[tab].options.plugins.tooltip.enabled = true;
+        _charts[tab].update('none');
+        return;
+    }
+
+    if (_charts[tab]) { _charts[tab].destroy(); _charts[tab] = null; }
+    _chartHost = name;
+    _charts[tab] = new Chart(ctx, {
+        type: 'line',
+        data: { datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    labels: { color: CH.text, boxWidth: 12, padding: 16 },
+                    onClick: (_evt, legendItem, legend) => {
+                        const chart = legend.chart;
+                        const idx = legendItem.datasetIndex;
+                        const ds = chart.data.datasets[idx];
+                        if (!ds) return;
+
+                        if (ds.metricId === 'tcp-rtt') {
+                            const nextVisible = !chart.isDatasetVisible(idx);
+                            chart.setDatasetVisibility(idx, nextVisible);
+                            const failIdx = chart.data.datasets.findIndex(d => d.metricId === 'tcp-failures');
+                            if (failIdx >= 0) {
+                                chart.setDatasetVisibility(
+                                    failIdx,
+                                    nextVisible && _tcpFailuresWanted
+                                );
+                            }
+                        } else if (ds.metricId === 'tcp-failures') {
+                            const tcpVisible = isMetricVisible(chart, 'tcp-rtt');
+                            if (tcpVisible) _tcpFailuresWanted = !chart.isDatasetVisible(idx);
+                            chart.setDatasetVisibility(idx, tcpVisible && _tcpFailuresWanted);
+                        } else {
+                            chart.setDatasetVisibility(idx, !chart.isDatasetVisible(idx));
+                        }
+                        chart.update();
+                    },
+                },
+                tooltip: {
+                    enabled: true,
+                    position: 'cursor',
+                    backgroundColor: CH.surface, borderColor: CH.border, borderWidth: 1,
+                    titleColor: CH.text, bodyColor: CH.dim,
+                    callbacks: tab === 'latency' ? {
+                        label: ctx => {
+                            const metric = ctx.dataset.metricId === 'tcp-rtt'
+                                ? 'TCP RTT'
+                                : ctx.dataset.label.split(' (')[0];
+                            return metric + ': ' + fmtMs(ctx.parsed.y);
+                        },
+                    } : {},
+                },
             },
-          } : {},
+            scales: {
+                x: {
+                    type: 'time',
+                    min: winStart,
+                    max: winEnd,
+                    time: {
+                        unit: zl.tickUnit,
+                        displayFormats: xAxisDisplayFormats(zl),
+                        tooltipFormat: 'MMM d HH:mm:ss',
+                    },
+                    ticks: xAxisTicks(zl, CH.dim),
+                    grid:  { color: CH.border },
+                },
+                ...yScales,
+            },
         },
-      },
-      scales: {
-        x: {
-          type: 'time',
-          min: winStart,
-          max: winEnd,
-          time: {
-            unit: zl.tickUnit,
-            displayFormats: xAxisDisplayFormats(zl),
-            tooltipFormat: 'MMM d HH:mm:ss',
-          },
-          ticks: xAxisTicks(zl, CH.dim),
-          grid:  { color: CH.border },
-        },
-        ...yScales,
-      },
-    },
-  });
+    });
 }
 
 // ── Auto-refresh dashboard every 5 s ─────────────────────────────────────────
 function refreshDashboard() {
-  const tbody = document.getElementById('host-rows');
-  if (tbody.contains(document.activeElement)) return;
+    const tbody = document.getElementById('host-rows');
+    if (tbody.contains(document.activeElement)) return;
 
-  fetch('/api/status')
-    .then(r => r.json())
-    .then(data => {
-      const thr = data.thresholds || {};
-      const savedEditRows = new Map();
-      tbody.querySelectorAll('.edit-row.active').forEach(el => savedEditRows.set(el.id, el.cloneNode(true)));
-      let html = '';
-      data.hosts.forEach((h, i) => {
-        const name = h.name;
-        const r  = data.results[name] || {};
-        const p  = r.ping   || {};
-        const t  = r.tcp    || {};
-        const ip = r.iperf3 || {};
+    fetch('/api/status')
+        .then(r => r.json())
+        .then(data => {
+            const thr = data.thresholds || {};
+            const savedEditRows = new Map();
+            tbody.querySelectorAll('.edit-row.active').forEach(el => savedEditRows.set(el.id, el.cloneNode(true)));
+            let html = '';
+            data.hosts.forEach((h, i) => {
+                const name = h.name;
+                const r  = data.results[name] || {};
+                const p  = r.ping   || {};
+                const t  = r.tcp    || {};
+                const ip = r.iperf3 || {};
 
-        const pw = thr.ping_warn_ms || 100, pc = thr.ping_crit_ms || 300;
-        const lw = thr.loss_warn_pct || 1,  lc = thr.loss_crit_pct || 5;
-        const tw = thr.tcp_warn_ms  || 150, tc = thr.tcp_crit_ms   || 500;
-        const bw = thr.bw_warn_mbps || 50,  bc = thr.bw_crit_mbps  || 10;
+                const pw = thr.ping_warn_ms || 100, pc = thr.ping_crit_ms || 300;
+                const lw = thr.loss_warn_pct || 1,  lc = thr.loss_crit_pct || 5;
+                const tw = thr.tcp_warn_ms  || 150, tc = thr.tcp_crit_ms   || 500;
+                const bw = thr.bw_warn_mbps || 50,  bc = thr.bw_crit_mbps  || 10;
 
-        function cls(v, w, c, low) {
-          if (v == null) return 'val-dim';
-          if (low) return v <= c ? 'val-red' : v <= w ? 'val-yellow' : 'val-green';
-          return v >= c ? 'val-red' : v >= w ? 'val-yellow' : 'val-green';
-        }
-        function fmt(v, suf, dec) {
-          if (v == null) return '—';
-          if (suf === ' ms' || suf === 'ms') return fmtDur(v);
-          const r = Math.round(v * 100) / 100;
-          return r.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: dec !== undefined ? dec : 2 }) + (suf || '');
-        }
+                function cls(v, w, c, low) {
+                    if (v == null) return 'val-dim';
+                    if (low) return v <= c ? 'val-red' : v <= w ? 'val-yellow' : 'val-green';
+                    return v >= c ? 'val-red' : v >= w ? 'val-yellow' : 'val-green';
+                }
+                function fmt(v, suf, dec) {
+                    if (v == null) return '—';
+                    if (suf === ' ms' || suf === 'ms') return fmtDur(v);
+                    const r = Math.round(v * 100) / 100;
+                    return r.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: dec !== undefined ? dec : 2 }) + (suf || '');
+                }
 
-        let icon = '?';
-        if (p.success === false || (p.loss != null && p.loss >= 50))
-          icon = '<span class="val-red">✗</span>';
-        else if (p.success)
-          icon = (p.loss >= 1 || t.success === false)
-            ? '<span class="val-yellow">⚠</span>'
-            : '<span class="val-green">✓</span>';
+                let icon = '?';
+                if (p.success === false || (p.loss != null && p.loss >= 50))
+                    icon = '<span class="val-red">✗</span>';
+                else if (p.success)
+                    icon = (p.loss >= 1 || t.success === false)
+                        ? '<span class="val-yellow">⚠</span>'
+                        : '<span class="val-green">✓</span>';
 
-        const avg    = p.success     ? p.avg          : null;
-        const jitter = p.success     ? p.jitter        : null;
-        const loss   = p.loss != null ? p.loss         : null;
-        const rtt    = t.success     ? t.rtt           : null;
-        const dl      = ip.success ? ip.download_mbps : null;
-        const ul      = ip.success ? ip.upload_mbps   : null;
-        const ipErr   = (ip.success === false && ip.error) ? ip.error : null;
+                const avg    = p.success     ? p.avg          : null;
+                const jitter = p.success     ? p.jitter        : null;
+                const loss   = p.loss != null ? p.loss         : null;
+                const rtt    = t.success     ? t.rtt           : null;
+                const dl      = ip.success ? ip.download_mbps : null;
+                const ul      = ip.success ? ip.upload_mbps   : null;
+                const ipErr   = (ip.success === false && ip.error) ? ip.error : null;
 
-        const safeName = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-        const sel = (_selectedHost === name) ? ' selected' : '';
+                const safeName = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+                const sel = (_selectedHost === name) ? ' selected' : '';
 
-        html += '<tr class="data-row' + sel + '" id="row-' + i + '" onclick="selectHost(\'' + safeName + '\',' + i + ')">';
-        html += '<td class="val-dim">' + (i+1) + '</td>';
-        html += '<td><strong>' + name + '</strong></td>';
-        html += '<td class="host-col">' + h.host + '</td>';
-        html += '<td class="icon">' + icon + '</td>';
-        const FAIL = '<span class="val-red">✗</span>';
-        html += '<td class="' + cls(avg, pw, pc) + '">'           + (p.success === false ? FAIL : fmt(avg, ' ms'))   + '</td>';
-        html += '<td class="' + cls(jitter, pw*0.3, pc*0.3) + '">'+ (p.success === false ? FAIL : fmt(jitter,' ms')) + '</td>';
-        html += '<td class="' + cls(loss, lw, lc) + '">'          + fmt(loss, '%')                                    + '</td>';
-        html += '<td class="' + cls(rtt, tw, tc) + '">'           + (t.success === false ? FAIL : fmt(rtt, ' ms'))   + '</td>';
-        const dlCell = dl != null ? fmt(dl, '', 0) : ipErr ? '<span class="val-yellow err-tip" title="' + escAttr(ipErr) + '">⚠</span>' : '—';
-        html += '<td class="' + cls(dl, bw, bc, true) + '">' + dlCell + '</td>';
-        html += '<td class="' + cls(ul, bw, bc, true) + '">' + fmt(ul, '', 0) + '</td>';
-        html += '<td onclick="event.stopPropagation()">';
-        html += '<button class="btn-sm btn-run" id="run-'+i+'" onclick="triggerIperf3('+i+')" title="Run bandwidth test now">⚡</button> ';
-        html += '<button class="btn-sm btn-edit" onclick="toggleEdit('+i+')">✎</button> ';
-        html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(\'Delete '+safeName+'?\')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
-        html += '</td></tr>';
+                html += '<tr class="data-row' + sel + '" id="row-' + i + '" onclick="selectHost(\'' + safeName + '\',' + i + ')">';
+                html += '<td class="val-dim">' + (i+1) + '</td>';
+                html += '<td><strong>' + name + '</strong></td>';
+                html += '<td class="host-col">' + h.host + '</td>';
+                html += '<td class="icon">' + icon + '</td>';
+                const FAIL = '<span class="val-red">✗</span>';
+                html += '<td class="' + cls(avg, pw, pc) + '">'           + (p.success === false ? FAIL : fmt(avg, ' ms'))   + '</td>';
+                html += '<td class="' + cls(jitter, pw*0.3, pc*0.3) + '">'+ (p.success === false ? FAIL : fmt(jitter,' ms')) + '</td>';
+                html += '<td class="' + cls(loss, lw, lc) + '">'          + fmt(loss, '%')                                    + '</td>';
+                html += '<td class="' + cls(rtt, tw, tc) + '">'           + (t.success === false ? FAIL : fmt(rtt, ' ms'))   + '</td>';
+                const dlCell = dl != null ? fmt(dl, '', 0) : ipErr ? '<span class="val-yellow err-tip" title="' + escAttr(ipErr) + '">⚠</span>' : '—';
+                html += '<td class="' + cls(dl, bw, bc, true) + '">' + dlCell + '</td>';
+                html += '<td class="' + cls(ul, bw, bc, true) + '">' + fmt(ul, '', 0) + '</td>';
+                html += '<td onclick="event.stopPropagation()">';
+                html += '<button class="btn-sm btn-run" id="run-'+i+'" onclick="triggerIperf3('+i+')" title="Run bandwidth test now">⚡</button> ';
+                html += '<button class="btn-sm btn-edit" onclick="toggleEdit('+i+')">✎</button> ';
+                html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(\'Delete '+safeName+'?\')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
+                html += '</td></tr>';
 
-        html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="11">';
-        html += '<form method="POST" action="/hosts/'+i+'/edit" class="edit-form">';
-        html += '<div class="form-group"><label>Name</label><input name="name" value="'+h.name+'" required></div>';
-        html += '<div class="form-group"><label>Host</label><input name="host" value="'+h.host+'" required></div>';
-        html += '<div class="form-group"><label>SSH User</label><input name="ssh_user" value="'+(h.ssh_user||'')+'"></div>';
-        html += '<div class="form-group"><label>SSH Port</label><input name="ssh_port" type="number" value="'+(h.ssh_port||22)+'"></div>';
-        html += '<div class="form-group"><label>Password</label><input name="password" type="password" autocomplete="new-password" value="" placeholder="leave blank for key/agent"></div>';
-        html += '<button type="submit" class="btn btn-primary">Save</button>';
-        html += '<button type="button" class="btn btn-secondary" onclick="toggleEdit('+i+')">Cancel</button>';
-        html += '</form></td></tr>';
-      });
-      tbody.innerHTML = html;
-      savedEditRows.forEach((savedEl, id) => {
-        const newEl = document.getElementById(id);
-        if (newEl) newEl.parentNode.replaceChild(savedEl, newEl);
-      });
-      // Silently refresh history chart if host is selected and in live mode
-      if (_selectedHost && _windowEnd === null) fetchAndRender(_selectedHost);
-    })
-    .catch(() => {});
+                html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="11">';
+                html += '<form method="POST" action="/hosts/'+i+'/edit" class="edit-form">';
+                html += '<div class="form-group"><label>Name</label><input name="name" value="'+h.name+'" required></div>';
+                html += '<div class="form-group"><label>Host</label><input name="host" value="'+h.host+'" required></div>';
+                html += '<div class="form-group"><label>SSH User</label><input name="ssh_user" value="'+(h.ssh_user||'')+'"></div>';
+                html += '<div class="form-group"><label>SSH Port</label><input name="ssh_port" type="number" value="'+(h.ssh_port||22)+'"></div>';
+                html += '<div class="form-group"><label>Password</label><input name="password" type="password" autocomplete="new-password" value="" placeholder="leave blank for key/agent"></div>';
+                html += '<button type="submit" class="btn btn-primary">Save</button>';
+                html += '<button type="button" class="btn btn-secondary" onclick="toggleEdit('+i+')">Cancel</button>';
+                html += '</form></td></tr>';
+            });
+            tbody.innerHTML = html;
+            savedEditRows.forEach((savedEl, id) => {
+                const newEl = document.getElementById(id);
+                if (newEl) newEl.parentNode.replaceChild(savedEl, newEl);
+            });
+            // Silently refresh history chart if host is selected and in live mode
+            if (_selectedHost && _windowEnd === null) fetchAndRender(_selectedHost);
+        })
+        .catch(() => {});
 }
 setInterval(refreshDashboard, 5000);
 </script>

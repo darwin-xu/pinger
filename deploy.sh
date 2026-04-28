@@ -19,9 +19,9 @@ echo "==> Version (repo checksum): ${VERSION} (deployed ${DEPLOYED_AT})"
 
 echo "==> Syncing files to ${TARGET}:${REMOTE_DIR}"
 python3 checksum.py --files-only | rsync -av \
-  --no-perms --no-owner --no-group \
-  --files-from=- \
-  . "${TARGET}:${REMOTE_DIR}/"
+    --no-perms --no-owner --no-group \
+    --files-from=- \
+    . "${TARGET}:${REMOTE_DIR}/"
 
 echo "==> Restarting app on ${TARGET}"
 ssh "${TARGET}" "PINGER_CHECKSUM='${VERSION}' bash" <<'REMOTE'
@@ -30,28 +30,28 @@ cd ./pinger
 
 # Ensure a usable venv exists (recreate if missing or broken)
 if [ ! -x venv/bin/python ]; then
-  echo "  --> Creating virtual environment"
-  rm -rf venv
-  if python3 -m venv venv 2>/dev/null; then
-    echo "  --> venv created"
-  else
-    echo "  --> venv creation failed; attempting to install python3-venv and retry"
-    if [ "$(id -u)" -ne 0 ]; then SUDO='sudo'; else SUDO=''; fi
-    $SUDO apt-get update -y
-    $SUDO apt-get install -y python3-venv
-    python3 -m venv venv
-    echo "  --> venv created after installing python3-venv"
-  fi
+    echo "  --> Creating virtual environment"
+    rm -rf venv
+    if python3 -m venv venv 2>/dev/null; then
+        echo "  --> venv created"
+    else
+        echo "  --> venv creation failed; attempting to install python3-venv and retry"
+        if [ "$(id -u)" -ne 0 ]; then SUDO='sudo'; else SUDO=''; fi
+        $SUDO apt-get update -y
+        $SUDO apt-get install -y python3-venv
+        python3 -m venv venv
+        echo "  --> venv created after installing python3-venv"
+    fi
 fi
 
 # Ensure pip is available in venv; avoid hanging network bootstrap fallback
 if ! venv/bin/python -m pip --version >/dev/null 2>&1; then
-  echo "  --> pip missing in venv; trying ensurepip"
-  venv/bin/python -m ensurepip --upgrade >/dev/null 2>&1 || true
+    echo "  --> pip missing in venv; trying ensurepip"
+    venv/bin/python -m ensurepip --upgrade >/dev/null 2>&1 || true
 fi
 if ! venv/bin/python -m pip --version >/dev/null 2>&1; then
-  echo "  --> pip still unavailable in venv; please install python3-venv and rerun"
-  exit 1
+    echo "  --> pip still unavailable in venv; please install python3-venv and rerun"
+    exit 1
 fi
 
 echo "  --> Installing/updating dependencies in venv"
