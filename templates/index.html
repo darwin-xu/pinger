@@ -417,6 +417,7 @@ let _selectedIdx  = null;
 let _tcpFailed = [];          // raw failed TCP rows for current latency window
 let _tcpFailedThreshold = 20_000; // ms tolerance for tooltip match
 let _tcpFailuresWanted = true;
+const _hiddenState = {};  // metricId -> true (hidden) | false (visible); persists across host switches
 const PROBE_INTERVAL_MS = {{ (settings.probe_interval | default(30)) * 1000 }};
 const GAP_THRESHOLD_MS = PROBE_INTERVAL_MS * 2;
 
@@ -912,6 +913,7 @@ function renderChart(name, tab, data, winStart, winEnd) {
         const pingAvg   = computeAvg(data.ping, 'avg');
         const jitterAvg = computeAvg(data.ping, 'jitter');
         const tcpRttAvg = computeAvg(data.tcp,  'rtt');
+        const lossAvg   = computeAvg(data.ping, 'loss');
         const fmtLbl = (name, v) => v != null ? name + ': ' + fmtDur(v) : name;
         const lossRows = prepRows(data.ping);
         datasets = [
@@ -919,7 +921,7 @@ function renderChart(name, tab, data, winStart, winEnd) {
             lineDataset({ metricId: 'jitter',   label: fmtLbl('Jitter avg', jitterAvg), data: pointsWithGaps(ping, r => r.success ? r.jitter : null), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)' }),
             lineDataset({ metricId: 'tcp-rtt',  label: fmtLbl('TCP RTT avg', tcpRttAvg), data: pointsWithGaps(tcp,  r => r.success ? r.rtt    : null), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)' }),
             failureLegendDataset(tcpFailed.length, winStart),
-            lineDataset({ metricId: 'loss', label: 'Loss (%)', data: pointsWithGaps(lossRows, r => r.loss ?? null), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true, yAxisID: 'yLoss' }),
+            lineDataset({ metricId: 'loss', label: lossAvg != null ? 'Loss avg: ' + fmtNum(lossAvg) + '%' : 'Loss (%)', data: pointsWithGaps(lossRows, r => r.loss ?? null), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true, yAxisID: 'yLoss' }),
         ];
         yScales = {
             y:     { min: 0, position: 'left',  title: { display: true, text: 'latency', color: CH.dim }, ticks: { color: CH.dim, callback: v => fmtMs(v) }, grid: { color: CH.border } },
@@ -947,16 +949,16 @@ function renderChart(name, tab, data, winStart, winEnd) {
 
     // Same host+tab already displayed — update in place without animation
     if (_charts[tab] && _chartHost === name) {
-        // Preserve legend toggle state across data reloads
-        const hiddenByKey = {};
+        // Refresh hidden state from live chart (catches any toggles since last render)
         _charts[tab].data.datasets.forEach((ds, i) => {
-            hiddenByKey[ds.metricId || ds.label] = !_charts[tab].isDatasetVisible(i);
+            const key = ds.metricId || ds.label;
+            _hiddenState[key] = !_charts[tab].isDatasetVisible(i);
         });
-        if ('tcp-failures' in hiddenByKey && !hiddenByKey['tcp-rtt']) {
-            _tcpFailuresWanted = !hiddenByKey['tcp-failures'];
+        if ('tcp-failures' in _hiddenState && !_hiddenState['tcp-rtt']) {
+            _tcpFailuresWanted = !_hiddenState['tcp-failures'];
         }
-        datasets.forEach(ds => { if (hiddenByKey[ds.metricId || ds.label]) ds.hidden = true; });
-        const tcpHidden = !!hiddenByKey['tcp-rtt'];
+        datasets.forEach(ds => { if (_hiddenState[ds.metricId || ds.label]) ds.hidden = true; });
+        const tcpHidden = !!_hiddenState['tcp-rtt'];
         datasets.forEach(ds => {
             if (ds.metricId === 'tcp-failures' && tcpHidden) ds.hidden = true;
         });
@@ -973,6 +975,11 @@ function renderChart(name, tab, data, winStart, winEnd) {
 
     if (_charts[tab]) { _charts[tab].destroy(); _charts[tab] = null; }
     _chartHost = name;
+    // Apply persisted hidden state to freshly built datasets before chart creation
+    datasets.forEach(ds => { if (_hiddenState[ds.metricId || ds.label]) ds.hidden = true; });
+    if (!!_hiddenState['tcp-rtt']) {
+        datasets.forEach(ds => { if (ds.metricId === 'tcp-failures') ds.hidden = true; });
+    }
     _charts[tab] = new Chart(ctx, {
         type: 'line',
         data: { datasets },
@@ -991,19 +998,24 @@ function renderChart(name, tab, data, winStart, winEnd) {
                         if (ds.metricId === 'tcp-rtt') {
                             const nextVisible = !chart.isDatasetVisible(idx);
                             chart.setDatasetVisibility(idx, nextVisible);
+                            _hiddenState['tcp-rtt'] = !nextVisible;
                             const failIdx = chart.data.datasets.findIndex(d => d.metricId === 'tcp-failures');
                             if (failIdx >= 0) {
                                 chart.setDatasetVisibility(
                                     failIdx,
                                     nextVisible && _tcpFailuresWanted
                                 );
+                                _hiddenState['tcp-failures'] = !(nextVisible && _tcpFailuresWanted);
                             }
                         } else if (ds.metricId === 'tcp-failures') {
                             const tcpVisible = isMetricVisible(chart, 'tcp-rtt');
                             if (tcpVisible) _tcpFailuresWanted = !chart.isDatasetVisible(idx);
                             chart.setDatasetVisibility(idx, tcpVisible && _tcpFailuresWanted);
+                            _hiddenState['tcp-failures'] = !(tcpVisible && _tcpFailuresWanted);
                         } else {
-                            chart.setDatasetVisibility(idx, !chart.isDatasetVisible(idx));
+                            const nextVisible = !chart.isDatasetVisible(idx);
+                            chart.setDatasetVisibility(idx, nextVisible);
+                            _hiddenState[ds.metricId || ds.label] = !nextVisible;
                         }
                         chart.update();
                     },
