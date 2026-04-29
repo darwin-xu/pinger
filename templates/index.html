@@ -200,6 +200,18 @@
     .btn-run.running { color: var(--yellow); animation: spin 1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .err-tip { cursor: help; }
+    /* ── Compare mode controls ───────────────────────────────── */
+    .mode-radio-group { display:inline-flex; gap:12px; align-items:center; font-size:0.8rem; color:var(--text-dim); white-space:nowrap; }
+    .mode-radio-group label { cursor:pointer; display:inline-flex; align-items:center; gap:3px; }
+    .mode-radio-group input[type=radio] { accent-color:var(--cyan); }
+    /* Compare checkbox column — always occupies the same width slot; content hidden via visibility in dedicated mode */
+    #dashboard th.compare-col, #dashboard td.compare-col { width:28px; padding:4px 2px; text-align:center; }
+    #dashboard td.compare-col > * { visibility:hidden; pointer-events:none; }
+    #dashboard.compare-mode td.compare-col > * { visibility:visible; pointer-events:auto; }
+    /* Legend / metric bar — always above the canvas, same slot in both modes */
+    #compare-metric-bar { display:flex; justify-content:center; gap:8px 16px; flex-wrap:wrap; align-items:center; padding:4px 0 10px 0; min-height:28px; }
+    #compare-metric-bar label { display:inline-flex; align-items:center; gap:5px; font-size:0.82rem; color:var(--text); cursor:pointer; }
+    #compare-metric-bar input[type=radio] { accent-color:var(--cyan); }
 
     /* ── Responsive ─────────────────────────────────────── */
     @media (max-width: 900px) {
@@ -236,7 +248,7 @@
 <table id="dashboard">
 <thead>
     <tr>
-        <th>#</th><th>Name</th><th>Provider</th><th>Host</th><th></th>
+        <th>#</th><th class="compare-col"></th><th>Name</th><th>Provider</th><th>Host</th><th></th>
         <th>Ping avg</th><th>Jitter</th><th>Loss</th><th>TCP RTT</th>
         <th>↓ Mbps</th><th>↑ Mbps</th><th></th>
     </tr>
@@ -250,6 +262,7 @@
 {% set ip = r.get('iperf3', {}) %}
 <tr class="data-row" id="row-{{ loop.index0 }}" onclick="selectHost('{{ name }}', {{ loop.index0 }})">
     <td class="val-dim">{{ loop.index }}</td>
+    <td class="compare-col" onclick="event.stopPropagation()"><input type="checkbox" class="compare-cb" value="{{ name }}" checked onchange="_triggerCompare()"></td>
     <td><strong>{{ name }}</strong></td>
     <td>{% if h.get('provider') %}<a href="{{ ('https://' + h.provider) if not h.provider.startswith('http') else h.provider }}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--cyan);text-decoration:none;font-size:0.85rem">{{ h.provider }}</a>{% else %}<span class="val-dim">—</span>{% endif %}</td>
     <td class="host-col">{{ h.host }}</td>
@@ -277,7 +290,7 @@
 </tr>
 <!-- inline edit row -->
 <tr class="edit-row" id="edit-{{ loop.index0 }}">
-<td colspan="12">
+<td colspan="13">
     <form method="POST" action="/hosts/{{ loop.index0 }}/edit" class="edit-form">
         <div class="form-group"><label>Name</label>
             <input name="name" value="{{ h.name }}" required></div>
@@ -302,8 +315,15 @@
 
 <!-- ── History chart ────────────────────────────────────────────── -->
 <div id="chart-section" style="display:none; margin-bottom:32px">
-    <div class="table-header" style="margin-bottom:6px">
-        <h2>History &mdash; <span id="chart-host-name"></span></h2>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px">
+        <h2 style="font-size:1rem; color:var(--text-dim); font-weight:500; margin:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap">
+            History &mdash;
+            <span class="mode-radio-group">
+                <label><input type="radio" name="chart-mode" value="dedicated" checked onchange="setChartMode('dedicated')"> Dedicated</label>
+                <label><input type="radio" name="chart-mode" value="compare" onchange="setChartMode('compare')"> Compare</label>
+            </span>
+            <span id="chart-host-name"></span>
+        </h2>
         <div class="zoom-controls" style="margin-bottom:0">
             <span id="chart-range-label" class="zoom-range-label"></span>
             <div class="zoom-btns">
@@ -321,9 +341,10 @@
     </div>
     <div style="display:flex; flex-direction:column; gap:12px">
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px 16px 16px">
+            <div id="compare-metric-bar"></div>
             <div style="height:330px"><canvas id="history-chart-latency"></canvas></div>
         </div>
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+        <div id="bw-chart-card" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
             <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px">Bandwidth</div>
             <div style="height:220px"><canvas id="history-chart-bandwidth"></canvas></div>
         </div>
@@ -418,8 +439,18 @@ let _tcpFailed = [];          // raw failed TCP rows for current latency window
 let _tcpFailedThreshold = 20_000; // ms tolerance for tooltip match
 let _tcpFailuresWanted = true;
 const _hiddenState = {};  // metricId -> true (hidden) | false (visible); persists across host switches
+let _chartMode = 'dedicated';     // 'dedicated' | 'compare'
+let _compareMetric = 'ping-avg';  // selected metric in compare mode
 const PROBE_INTERVAL_MS = {{ (settings.probe_interval | default(30)) * 1000 }};
 const GAP_THRESHOLD_MS = PROBE_INTERVAL_MS * 2;
+const COMPARE_COLORS = ['#58a6ff', '#3fb950', '#ffa657', '#bc8cff', '#f85149', '#39d0d8', '#d29922'];
+const COMPARE_METRICS = [
+    { id: 'ping-avg', label: 'Ping',    probe: 'ping', field: 'avg'    },
+    { id: 'jitter',   label: 'Jitter',  probe: 'ping', field: 'jitter' },
+    { id: 'tcp-rtt',  label: 'TCP RTT', probe: 'tcp',  field: 'rtt'    },
+    { id: 'loss',     label: 'Loss',    probe: 'ping', field: 'loss'   },
+];
+let _lastCompareRender = null; // { hostDataList, winStart, winEnd }
 
 function escAttr(s) {
     return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -586,9 +617,22 @@ function selectHost(name, idx) {
     document.querySelectorAll('#host-rows tr.data-row').forEach(r => r.classList.remove('selected'));
     const row = document.getElementById('row-' + idx);
     if (row) row.classList.add('selected');
-    document.getElementById('chart-host-name').textContent = name;
     document.getElementById('chart-section').style.display = 'block';
-    fetchAndRender(name);
+    if (_chartMode === 'compare') {
+        document.getElementById('chart-host-name').textContent = '';
+        if (_lastCompareRender) {
+            renderCompareChart(_lastCompareRender.hostDataList, _lastCompareRender.winStart, _lastCompareRender.winEnd);
+        } else {
+            _triggerCompare();
+        }
+    } else {
+        document.getElementById('chart-host-name').textContent = name;
+        // Only show placeholder if bar is empty (e.g. first selection); otherwise
+        // keep the previous server's labels visible until new data replaces them.
+        const bar = document.getElementById('compare-metric-bar');
+        if (bar && bar.childElementCount === 0) _buildStaticDedicatedLegend();
+        fetchAndRender(name);
+    }
 }
 
 function switchChartTab(tab) {
@@ -614,7 +658,259 @@ function panRight()  {
     _windowEnd = end >= Date.now() - 5000 ? null : end;
     _applyZoom();
 }
-function _applyZoom() { if (_selectedHost) fetchAndRender(_selectedHost); }
+function _applyZoom() {
+    if (_chartMode === 'compare') {
+        _triggerCompare();
+    } else if (_selectedHost) {
+        fetchAndRender(_selectedHost);
+    }
+}
+
+// ── Compare mode ─────────────────────────────────────────────────────────────
+
+function setChartMode(mode) {
+    _chartMode = mode;
+    const table     = document.getElementById('dashboard');
+    const metricBar = document.getElementById('compare-metric-bar');
+    const bwCard    = document.getElementById('bw-chart-card');
+    const hostNameEl = document.getElementById('chart-host-name');
+    if (mode === 'compare') {
+        if (table) table.classList.add('compare-mode');
+        if (bwCard) bwCard.style.display = 'none';
+        hostNameEl.textContent = '';
+        // Destroy dedicated charts so compare chart can use the latency canvas
+        ['latency', 'bandwidth'].forEach(t => {
+            if (_charts[t]) { _charts[t].destroy(); _charts[t] = null; }
+        });
+        document.getElementById('chart-section').style.display = 'block';
+        _buildCompareMetricBar();
+        _triggerCompare();
+    } else {
+        if (table) table.classList.remove('compare-mode');
+        if (metricBar) metricBar.innerHTML = '';
+        if (bwCard) bwCard.style.display = '';
+        if (_charts['compare']) { _charts['compare'].destroy(); _charts['compare'] = null; }
+        hostNameEl.textContent = _selectedHost || '';
+        _buildStaticDedicatedLegend();
+        if (_selectedHost) fetchAndRender(_selectedHost);
+    }
+}
+
+function setCompareMetric(metricId) {
+    _compareMetric = metricId;
+    // Destroy compare chart so it is rebuilt with the new y-axis configuration
+    if (_charts['compare']) { _charts['compare'].destroy(); _charts['compare'] = null; }
+    _triggerCompare();
+}
+
+function _buildStaticDedicatedLegend() {
+    if (_chartMode !== 'dedicated') return;
+    const bar = document.getElementById('compare-metric-bar');
+    if (!bar) return;
+    const items = [
+        { id: 'ping-avg',     label: 'Ping avg',        color: '#3fb950' },
+        { id: 'jitter',       label: 'Jitter avg',       color: '#d29922' },
+        { id: 'tcp-rtt',      label: 'TCP RTT avg',      color: '#58a6ff' },
+        { id: 'tcp-failures', label: 'TCP RTT failures', color: '#f85149' },
+        { id: 'loss',         label: 'Loss',             color: '#f85149' },
+    ];
+    bar.innerHTML = items.map((item, i) => {
+        const hidden = !!_hiddenState[item.id] ||
+                       (item.id === 'tcp-failures' && !_tcpFailuresWanted);
+        const c = escAttr(item.color);
+        return '<span onclick="_toggleLegend(' + i + ')" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:0.82rem;color:' +
+               c + ';' + (hidden ? 'opacity:0.4;text-decoration:line-through;' : '') + '">' +
+               '<span style="display:inline-block;width:12px;height:2px;background:' + c + ';flex-shrink:0"></span>' +
+               escAttr(item.label) + '</span>';
+    }).join('');
+}
+
+function _buildDedicatedLegend(chart) {
+    if (_chartMode !== 'dedicated') return;
+    const bar = document.getElementById('compare-metric-bar');
+    if (!bar) return;
+    bar.innerHTML = chart.data.datasets.map((ds, i) => {
+        const visible = chart.isDatasetVisible(i);
+        const c = escAttr(ds.borderColor);
+        return '<span onclick="_toggleLegend(' + i + ')" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:0.82rem;color:' +
+               c + ';' + (visible ? '' : 'opacity:0.4;text-decoration:line-through;') + '">' +
+               '<span style="display:inline-block;width:12px;height:2px;background:' + c + ';flex-shrink:0"></span>' +
+               escAttr(ds.label) + '</span>';
+    }).join('');
+}
+
+function _toggleLegend(idx) {
+    const chart = _charts['latency'];
+    if (!chart) return;
+    const ds = chart.data.datasets[idx];
+    if (!ds) return;
+    if (ds.metricId === 'tcp-rtt') {
+        const nextVisible = !chart.isDatasetVisible(idx);
+        chart.setDatasetVisibility(idx, nextVisible);
+        _hiddenState['tcp-rtt'] = !nextVisible;
+        const failIdx = chart.data.datasets.findIndex(d => d.metricId === 'tcp-failures');
+        if (failIdx >= 0) {
+            chart.setDatasetVisibility(failIdx, nextVisible && _tcpFailuresWanted);
+            _hiddenState['tcp-failures'] = !(nextVisible && _tcpFailuresWanted);
+        }
+    } else if (ds.metricId === 'tcp-failures') {
+        const tcpVisible = isMetricVisible(chart, 'tcp-rtt');
+        if (tcpVisible) _tcpFailuresWanted = !chart.isDatasetVisible(idx);
+        chart.setDatasetVisibility(idx, tcpVisible && _tcpFailuresWanted);
+        _hiddenState['tcp-failures'] = !(tcpVisible && _tcpFailuresWanted);
+    } else {
+        const nextVisible = !chart.isDatasetVisible(idx);
+        chart.setDatasetVisibility(idx, nextVisible);
+        _hiddenState[ds.metricId || ds.label] = !nextVisible;
+    }
+    chart.update();
+    _buildDedicatedLegend(chart);
+}
+
+function _buildCompareMetricBar() {
+    const bar = document.getElementById('compare-metric-bar');
+    if (!bar) return;
+    bar.innerHTML = COMPARE_METRICS.map(m =>
+        '<label><input type="radio" name="cmp-metric" value="' + escAttr(m.id) + '"' +
+        (m.id === _compareMetric ? ' checked' : '') +
+        ' onchange="setCompareMetric(\'' + escAttr(m.id) + '\')">&nbsp;' + escAttr(m.label) + '</label>'
+    ).join('');
+}
+
+function _getCompareHosts() {
+    return Array.from(
+        document.querySelectorAll('#dashboard .compare-cb:checked')
+    ).map(b => b.value).slice(0, 7);
+}
+
+function _triggerCompare() {
+    const zl = ZOOM_LEVELS[_zoomIdx];
+    const liveEnd = _windowEnd || Date.now();
+    const { winStart, winEnd } = zl.tickUnit === 'month'
+        ? monthWindowForEnd(liveEnd)
+        : { winStart: tickCeil(liveEnd, zl) - zl.windowMs, winEnd: tickCeil(liveEnd, zl) };
+    fetchAndRenderCompare(winStart, winEnd);
+    updateZoomControls(winStart, winEnd);
+}
+
+function fetchAndRenderCompare(winStart, winEnd) {
+    const hosts = _getCompareHosts();
+    if (!hosts.length) return;
+    const limit = Math.min(Math.ceil((winEnd - winStart) / Math.max(PROBE_INTERVAL_MS, 1000)) + 200, 50000);
+    const since = new Date(winStart).toISOString().slice(0, 19);
+    const until = new Date(winEnd).toISOString().slice(0, 19);
+    Promise.all(hosts.map(name =>
+        fetch('/api/history/' + encodeURIComponent(name) +
+              '?since=' + encodeURIComponent(since) + '&until=' + encodeURIComponent(until) + '&limit=' + limit)
+            .then(r => r.json())
+            .then(data => ({ name, data }))
+            .catch(() => null)
+    )).then(results => {
+        renderCompareChart(results.filter(Boolean), winStart, winEnd);
+    }).catch(() => {});
+}
+
+function renderCompareChart(hostDataList, winStart, winEnd) {
+    _lastCompareRender = { hostDataList, winStart, winEnd };
+    const CH = { bg: '#0d1117', surface: '#161b22', border: '#30363d',
+                 text: '#c9d1d9', dim: '#8b949e' };
+    const zl = ZOOM_LEVELS[_zoomIdx];
+    const metric = COMPARE_METRICS.find(m => m.id === _compareMetric) || COMPARE_METRICS[0];
+    const isLoss = (metric.id === 'loss');
+
+    // Aggregate when any host has more than 150 raw points in the window
+    const anyDense = hostDataList.some(({ data }) => {
+        const raw = metric.probe === 'tcp' ? data.tcp : data.ping;
+        return raw.filter(r => {
+            const t = new Date(_ts(r)).getTime();
+            return t >= winStart && t <= winEnd;
+        }).length > 150;
+    });
+
+    const datasets = hostDataList.slice(0, 7).map(({ name, data }, i) => {
+        const raw = metric.probe === 'tcp' ? data.tcp : data.ping;
+        const asc = [...raw].reverse().filter(r => {
+            const t = new Date(_ts(r)).getTime();
+            return t >= winStart && t <= winEnd;
+        });
+        const rows = anyDense ? aggregateSeries(asc, winStart, winEnd, 100) : asc;
+        const color = COMPARE_COLORS[i % COMPARE_COLORS.length];
+        const isSelected = (name === _selectedHost);
+        return lineDataset({
+            metricId: 'compare-' + i,
+            label: name,
+            data: pointsWithGaps(rows, r => {
+                if (isLoss) return r.loss ?? null;
+                return r.success ? (r[metric.field] ?? null) : null;
+            }),
+            borderColor: color,
+            backgroundColor: color + '14',
+            borderWidth: isSelected ? 4 : 2,
+        });
+    });
+
+    const yAxisTitle = isLoss ? 'loss %' : metric.label.toLowerCase();
+    const yScales = {
+        y: {
+            min: 0,
+            ...(isLoss ? { max: 100 } : {}),
+            position: 'left',
+            title: { display: true, text: yAxisTitle, color: CH.dim },
+            ticks: { color: CH.dim, callback: v => isLoss ? v + '%' : fmtMs(v) },
+            grid: { color: CH.border },
+        },
+    };
+
+    const canvasEl = document.getElementById('history-chart-latency');
+    if (!canvasEl) return;
+
+    // Update in place if chart already exists (same metric type)
+    if (_charts['compare']) {
+        _charts['compare'].data.datasets = datasets;
+        const sc = _charts['compare'].options.scales;
+        sc.x.min = winStart; sc.x.max = winEnd;
+        sc.x.time.unit = zl.tickUnit;
+        sc.x.time.displayFormats = xAxisDisplayFormats(zl);
+        sc.x.ticks = xAxisTicks(zl, CH.dim);
+        sc.y = yScales.y;
+        _charts['compare'].update('none');
+        return;
+    }
+
+    _charts['compare'] = new Chart(canvasEl.getContext('2d'), {
+        type: 'line',
+        data: { datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    enabled: true, position: 'cursor',
+                    backgroundColor: CH.surface, borderColor: CH.border, borderWidth: 1,
+                    titleColor: CH.text, bodyColor: CH.dim,
+                    callbacks: {
+                        label: ctx => {
+                            const v = ctx.parsed.y;
+                            if (v == null) return null;
+                            const color = COMPARE_COLORS[ctx.datasetIndex % COMPARE_COLORS.length];
+                            return '\u25a0 ' + ctx.dataset.label + ': ' + (isLoss ? fmtNum(v) + '%' : fmtMs(v));
+                        },
+                    },
+                },
+            },
+            scales: {
+                x: {
+                    type: 'time', min: winStart, max: winEnd,
+                    time: { unit: zl.tickUnit, displayFormats: xAxisDisplayFormats(zl), tooltipFormat: 'MMM d HH:mm:ss' },
+                    ticks: xAxisTicks(zl, CH.dim),
+                    grid: { color: CH.border },
+                },
+                ...yScales,
+            },
+        },
+    });
+}
 
 function fetchAndRender(name) {
     const zl     = ZOOM_LEVELS[_zoomIdx];
@@ -751,7 +1047,7 @@ function pointsWithGaps(rows, valueFn) {
     });
 }
 
-function lineDataset({ metricId, label, data, borderColor, backgroundColor, yAxisID = 'y', fill = false }) {
+function lineDataset({ metricId, label, data, borderColor, backgroundColor, yAxisID = 'y', fill = false, borderWidth = 2 }) {
     return {
         metricId,
         label,
@@ -765,7 +1061,7 @@ function lineDataset({ metricId, label, data, borderColor, backgroundColor, yAxi
         yAxisID,
         segment: {
             borderColor: ctx => isLargeProbeGap(ctx) ? 'rgba(139,148,158,0.45)' : borderColor,
-            borderWidth: ctx => isLargeProbeGap(ctx) ? 1 : 2,
+            borderWidth: ctx => isLargeProbeGap(ctx) ? 1 : borderWidth,
         },
     };
 }
@@ -791,20 +1087,6 @@ function isMetricVisible(chart, metricId) {
 Chart.Tooltip.positioners.cursor = function(_elements, eventPosition) {
     return { x: eventPosition.x, y: eventPosition.y };
 };
-
-// Plugin: add extra vertical space between legend labels and the plot area
-// on the latency chart, by increasing the legend block height after fit().
-Chart.register({
-    id: 'legendBottomMargin',
-    beforeInit(chart) {
-        if (chart.canvas.id !== 'history-chart-latency') return;
-        const orig = chart.legend.fit.bind(chart.legend);
-        chart.legend.fit = function () {
-            orig();
-            this.height += 10;
-        };
-    }
-});
 
 // Global plugin: suppress tooltip when the hovered x position has no real data
 // (prevents the tooltip from showing in gaps or empty regions of the chart)
@@ -970,6 +1252,7 @@ function renderChart(name, tab, data, winStart, winEnd) {
         _charts[tab].options.scales.x.ticks = xAxisTicks(zl, CH.dim);
         _charts[tab].options.plugins.tooltip.enabled = true;
         _charts[tab].update('none');
+        if (tab === 'latency') _buildDedicatedLegend(_charts[tab]);
         return;
     }
 
@@ -987,39 +1270,7 @@ function renderChart(name, tab, data, winStart, winEnd) {
             responsive: true, maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
             plugins: {
-                legend: {
-                    labels: { color: CH.text, boxWidth: 12, padding: 16 },
-                    onClick: (_evt, legendItem, legend) => {
-                        const chart = legend.chart;
-                        const idx = legendItem.datasetIndex;
-                        const ds = chart.data.datasets[idx];
-                        if (!ds) return;
-
-                        if (ds.metricId === 'tcp-rtt') {
-                            const nextVisible = !chart.isDatasetVisible(idx);
-                            chart.setDatasetVisibility(idx, nextVisible);
-                            _hiddenState['tcp-rtt'] = !nextVisible;
-                            const failIdx = chart.data.datasets.findIndex(d => d.metricId === 'tcp-failures');
-                            if (failIdx >= 0) {
-                                chart.setDatasetVisibility(
-                                    failIdx,
-                                    nextVisible && _tcpFailuresWanted
-                                );
-                                _hiddenState['tcp-failures'] = !(nextVisible && _tcpFailuresWanted);
-                            }
-                        } else if (ds.metricId === 'tcp-failures') {
-                            const tcpVisible = isMetricVisible(chart, 'tcp-rtt');
-                            if (tcpVisible) _tcpFailuresWanted = !chart.isDatasetVisible(idx);
-                            chart.setDatasetVisibility(idx, tcpVisible && _tcpFailuresWanted);
-                            _hiddenState['tcp-failures'] = !(tcpVisible && _tcpFailuresWanted);
-                        } else {
-                            const nextVisible = !chart.isDatasetVisible(idx);
-                            chart.setDatasetVisibility(idx, nextVisible);
-                            _hiddenState[ds.metricId || ds.label] = !nextVisible;
-                        }
-                        chart.update();
-                    },
-                },
+                legend: tab === 'latency' ? { display: false } : { labels: { color: CH.text, boxWidth: 12, padding: 16 } },
                 tooltip: {
                     enabled: true,
                     position: 'cursor',
@@ -1052,6 +1303,7 @@ function renderChart(name, tab, data, winStart, winEnd) {
             },
         },
     });
+    if (tab === 'latency') _buildDedicatedLegend(_charts[tab]);
 }
 
 // ── Auto-refresh dashboard every 5 s ─────────────────────────────────────────
@@ -1065,6 +1317,8 @@ function refreshDashboard() {
             const thr = data.thresholds || {};
             const savedEditRows = new Map();
             tbody.querySelectorAll('.edit-row.active').forEach(el => savedEditRows.set(el.id, el.cloneNode(true)));
+            const cmpChecked = {};
+            tbody.querySelectorAll('.compare-cb').forEach(cb => { cmpChecked[cb.value] = cb.checked; });
             let html = '';
             data.hosts.forEach((h, i) => {
                 const name = h.name;
@@ -1110,7 +1364,15 @@ function refreshDashboard() {
                 const sel = (_selectedHost === name) ? ' selected' : '';
 
                 html += '<tr class="data-row' + sel + '" id="row-' + i + '" onclick="selectHost(\'' + safeName + '\',' + i + ')">';
+                const cmpColor = COMPARE_COLORS[Math.min(i, COMPARE_COLORS.length - 1)];
+                const cmpDisabled = i >= COMPARE_COLORS.length ? ' disabled' : '';
+                const cmpIsChecked = cmpChecked[name] !== false;
                 html += '<td class="val-dim">' + (i+1) + '</td>';
+                html += '<td class="compare-col" onclick="event.stopPropagation()">';
+                html += '<label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer">';
+                html += '<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:' + cmpColor + ';flex-shrink:0"></span>';
+                html += '<input type="checkbox" class="compare-cb" value="' + escAttr(name) + '"' + (cmpIsChecked ? ' checked' : '') + cmpDisabled + ' onchange="_triggerCompare()">';
+                html += '</label></td>';
                 html += '<td><strong>' + name + '</strong></td>';
                 const providerUrl = h.provider ? (h.provider.startsWith('http') ? h.provider : 'https://' + h.provider) : null;
                 html += '<td>' + (providerUrl ? '<a href="' + escAttr(providerUrl) + '" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none;font-size:0.85rem" onclick="event.stopPropagation()">' + escAttr(h.provider) + '</a>' : '<span class="val-dim">\u2014</span>') + '</td>';
@@ -1130,7 +1392,7 @@ function refreshDashboard() {
                 html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(\'Delete '+safeName+'?\')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
                 html += '</td></tr>';
 
-                html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="12">';
+                html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="13">';
                 html += '<form method="POST" action="/hosts/'+i+'/edit" class="edit-form">';
                 html += '<div class="form-group"><label>Name</label><input name="name" value="'+h.name+'" required></div>';
                 html += '<div class="form-group"><label>Provider</label><input name="provider" value="'+escAttr(h.provider||'')+'" placeholder="cloud.google.com"></div>';
@@ -1147,8 +1409,14 @@ function refreshDashboard() {
                 const newEl = document.getElementById(id);
                 if (newEl) newEl.parentNode.replaceChild(savedEl, newEl);
             });
-            // Silently refresh history chart if host is selected and in live mode
-            if (_selectedHost && _windowEnd === null) fetchAndRender(_selectedHost);
+            // Silently refresh history chart in live mode
+            if (_windowEnd === null) {
+                if (_chartMode === 'compare') {
+                    _triggerCompare();
+                } else if (_selectedHost) {
+                    fetchAndRender(_selectedHost);
+                }
+            }
         })
         .catch(() => {});
 }
