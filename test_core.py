@@ -211,6 +211,23 @@ class TestAppApi(unittest.TestCase):
 
         self.assertEqual(data, {"checksum": "abc123", "server_start": "2026-01-01T00:00:00Z"})
 
+    def test_settings_accepts_iperf3_interval_hours(self):
+        with patch.object(app_module, "save_config") as save_config:
+            resp = self.client.post(
+                "/settings",
+                data={
+                    "probe_interval": "30",
+                    "iperf3_interval": "0.5",
+                    "ping_count": "10",
+                    "iperf3_duration": "5",
+                    "iperf3_port": "5201",
+                },
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(app_module.engine.cfg["iperf3_interval"], 0.5)
+        save_config.assert_called_once()
+
 
 class TestEngineSnapshot(unittest.TestCase):
     def test_snapshot_returns_copies(self):

@@ -37,6 +37,7 @@
     th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
     th { color: var(--cyan); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;
         background: var(--surface); position: sticky; top: 0; }
+    th.unit-label { text-transform: none; letter-spacing: 0; }
     td { font-size: 0.9rem; font-variant-numeric: tabular-nums; }
     tr:hover td { background: rgba(88,166,255,0.05); }
 
@@ -250,7 +251,7 @@
     <tr>
         <th>#</th><th class="compare-col"></th><th>Name</th><th>Provider</th><th>Host</th><th></th>
         <th>Ping avg</th><th>Jitter</th><th>Loss</th><th>TCP RTT</th>
-        <th>↓ Mbps</th><th>↑ Mbps</th><th></th>
+        <th class="unit-label">↓ Mbps</th><th class="unit-label">↑ Mbps</th><th></th>
     </tr>
 </thead>
 <tbody id="host-rows">
@@ -304,6 +305,10 @@
             <input name="ssh_port" type="number" value="{{ h.get('ssh_port', 22) }}"></div>
         <div class="form-group"><label>Password</label>
             <input name="password" type="password" autocomplete="new-password" value="{{ h.get('password', '') }}" placeholder="leave blank for key/agent"></div>
+        <div class="form-group"><label>iperf3</label>
+            <label style="display:flex;align-items:center;gap:8px;color:var(--text);font-size:0.9rem">
+                <input name="iperf3" type="checkbox" {% if h.get('iperf3') %}checked{% endif %}> Periodic bandwidth
+            </label></div>
         <button type="submit" class="btn btn-primary">Save</button>
         <button type="button" class="btn btn-secondary" onclick="toggleEdit({{ loop.index0 }})">Cancel</button>
     </form>
@@ -368,6 +373,10 @@
                     <input name="ssh_port" type="number" value="22"></div>
                 <div class="form-group"><label>Password (optional)</label>
                     <input name="password" type="password" autocomplete="new-password" placeholder="leave blank for key/agent"></div>
+                <div class="form-group"><label>iperf3</label>
+                    <label style="display:flex;align-items:center;gap:8px;color:var(--text);font-size:0.9rem">
+                        <input name="iperf3" type="checkbox" checked> Periodic bandwidth
+                    </label></div>
             </div>
             <br>
             <button type="submit" class="btn btn-primary">Add Host</button>
@@ -385,6 +394,8 @@
             <div class="settings-grid">
                 <label>Probe interval (s)</label>
                     <input name="probe_interval" type="number" value="{{ settings.probe_interval }}">
+                <label>iperf3 interval (h)</label>
+                    <input name="iperf3_interval" type="number" min="0" step="0.25" value="{{ settings.iperf3_interval }}">
                 <label>Ping count</label>
                     <input name="ping_count" type="number" value="{{ settings.ping_count }}">
                 <label>iperf3 duration (s)</label>
@@ -1237,7 +1248,7 @@ function renderChart(name, tab, data, winStart, winEnd) {
             lineDataset({ metricId: 'download', label: '\u2193 Download (Mbps)', data: pointsWithGaps(rows, r => r.success ? r.download_mbps : null), borderColor: CH.green, backgroundColor: 'rgba(63,185,80,0.08)' }),
             lineDataset({ metricId: 'upload',   label: '\u2191 Upload (Mbps)',   data: pointsWithGaps(rows, r => r.success ? r.upload_mbps   : null), borderColor: CH.cyan,  backgroundColor: 'rgba(88,166,255,0.08)' }),
         ];
-        yScales = { y: { title: { display: true, text: 'Mbps', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
+        yScales = { y: { min: 0, title: { display: true, text: 'Mbps', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
 
     }
 
@@ -1266,6 +1277,9 @@ function renderChart(name, tab, data, winStart, winEnd) {
         _charts[tab].options.scales.x.time.unit = zl.tickUnit;
         _charts[tab].options.scales.x.time.displayFormats = xAxisDisplayFormats(zl);
         _charts[tab].options.scales.x.ticks = xAxisTicks(zl, CH.dim);
+        for (const [scaleId, scaleCfg] of Object.entries(yScales)) {
+            _charts[tab].options.scales[scaleId] = scaleCfg;
+        }
         _charts[tab].options.plugins.tooltip.enabled = true;
         _charts[tab].update('none');
         if (tab === 'latency') _buildDedicatedLegend(_charts[tab]);

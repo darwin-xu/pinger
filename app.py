@@ -56,6 +56,7 @@ def index():
         history=snap_h,
         settings={
             "probe_interval": cfg.get("probe_interval", 30),
+            "iperf3_interval": cfg.get("iperf3_interval", 1),
             "ping_count": cfg.get("ping_count", 10),
             "iperf3_duration": cfg.get("iperf3_duration", 5),
             "iperf3_port": cfg.get("iperf3_port", 5201),
@@ -96,6 +97,7 @@ def add_host():
     password = request.form.get("password", "").strip()
     if password:
         host_entry["password"] = password
+    host_entry["iperf3"] = request.form.get("iperf3") == "on"
 
     if "hosts" not in cfg:
         cfg["hosts"] = []
@@ -126,6 +128,7 @@ def edit_host(idx: int):
             hosts[idx]["password"] = password
         else:
             hosts[idx].pop("password", None)
+        hosts[idx]["iperf3"] = request.form.get("iperf3") == "on"
         save_config(cfg)
         engine.reload_config(cfg)
     return redirect(url_for("index"))
@@ -196,6 +199,9 @@ def update_settings():
         val = request.form.get(key)
         if val is not None:
             cfg[key] = int(val)
+    val = request.form.get("iperf3_interval")
+    if val is not None:
+        cfg["iperf3_interval"] = float(val)
 
     if "thresholds" not in cfg:
         cfg["thresholds"] = {}

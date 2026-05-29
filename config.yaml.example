@@ -1,5 +1,5 @@
 probe_interval: 30
-iperf3_interval: 300
+iperf3_interval: 1
 ping_count: 10
 iperf3_duration: 5
 iperf3_port: 5201

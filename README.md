@@ -23,7 +23,7 @@ A tool that periodically probes multiple VPS servers with three complementary me
 │       │     └── ICMP via system ping → latency, jitter, loss│
 │       ├── TCP probe    (every N s, parallel)                │
 │       │     └── TCP connect to SSH port → handshake RTT     │
-│       └── iperf3 probe (every M s, sequential)              │
+│       └── iperf3 probe (every M h, sequential; 0 disables)  │
 │             ├── SSH → auto-install iperf3 if missing        │
 │             ├── SSH → start iperf3 -s briefly               │
 │             ├── iperf3 client: upload + download test       │
@@ -177,7 +177,7 @@ python3 -m unittest discover
 
 ```yaml
 probe_interval:   30    # seconds between ping + TCP cycles
-iperf3_interval:  300   # seconds between iperf3 cycles
+iperf3_interval:  1     # hours between iperf3 cycles; 0 disables periodic tests
 ping_count:       10    # ICMP packets per probe run
 iperf3_duration:  5     # seconds per iperf3 direction
 iperf3_port:      5201  # port used during iperf3 tests
@@ -204,6 +204,7 @@ hosts:
 ### Tuning tips
 
 - Increase `probe_interval` (e.g. `60`) to reduce noise and network traffic.
+- Increase `iperf3_interval` to reduce bandwidth-test traffic, or set it to `0` to disable periodic iperf3 tests globally.
 - Set `iperf3: false` for VPS where you only want latency monitoring.
 - Lower `bw_warn_mbps` / `bw_crit_mbps` for servers with limited bandwidth.
 - The TCP probe connects to `ssh_port`, doubling as an SSH availability check.
@@ -235,7 +236,7 @@ Query history directly:
 sqlite3 pinger.db "SELECT ts, data FROM metrics WHERE host='Tokyo-1' AND probe='ping' ORDER BY ts DESC LIMIT 10;"
 ```
 
-The history charts use `probe_interval` to identify missing probe windows. When adjacent samples are separated by more than two probe intervals, the connecting segment is drawn thinner and lighter so downtime or dashboard gaps are not mistaken for normal measurements. The TCP RTT failures legend shows the number of failed TCP probes in the current chart window and toggles the failure markers.
+The history charts use `probe_interval` to identify missing probe windows. When adjacent samples are separated by more than two probe intervals, the connecting segment is drawn thinner and lighter so downtime or dashboard gaps are not mistaken for normal measurements. Y-axes are anchored at zero so charts show the full range from 0 to the observed maximum instead of zooming into only the observed min/max band. The TCP RTT failures legend shows the number of failed TCP probes in the current chart window and toggles the failure markers.
 On the 12h chart scale, x-axis labels include the date. On the 1mo scale, chart ticks align to the 1st of each month and the live range ends at the current time instead of a future month boundary.
 
 ---

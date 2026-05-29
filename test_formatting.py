@@ -160,3 +160,13 @@ class TestHistoryChartTemplate(unittest.TestCase):
         src = self._template_source()
         assert "_charts[tab].options.scales.x.ticks = xAxisTicks(zl, CH.dim);" in src
         assert "ticks: xAxisTicks(zl, CH.dim)" in src
+
+    def test_bandwidth_axis_starts_at_zero(self):
+        src = self._template_source()
+        assert "iperf3 interval (h)" in src
+        assert "yScales = { y: { min: 0, title: { display: true, text: 'Mbps'" in src
+
+    def test_dashboard_bandwidth_headers_preserve_mbps_case(self):
+        src = self._template_source()
+        assert 'th.unit-label { text-transform: none; letter-spacing: 0; }' in src
+        assert '<th class="unit-label">↓ Mbps</th><th class="unit-label">↑ Mbps</th>' in src
