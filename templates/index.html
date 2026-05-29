@@ -451,6 +451,8 @@ const COMPARE_METRICS = [
     { id: 'loss',     label: 'Loss',    probe: 'ping', field: 'loss'   },
 ];
 let _lastCompareRender = null; // { hostDataList, winStart, winEnd }
+let _historyFetchAC  = null;   // AbortController for fetchAndRender
+let _compareFetchAC  = null;   // AbortController for fetchAndRenderCompare
 
 function escAttr(s) {
     return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -794,6 +796,11 @@ function _triggerCompare() {
 }
 
 function fetchAndRenderCompare(winStart, winEnd) {
+    // Cancel any previous in-flight compare requests.
+    if (_compareFetchAC) { _compareFetchAC.abort(); }
+    _compareFetchAC = new AbortController();
+    const signal = _compareFetchAC.signal;
+
     const hosts = _getCompareHosts();
     if (!hosts.length) return;
     const limit = Math.min(Math.ceil((winEnd - winStart) / Math.max(PROBE_INTERVAL_MS, 1000)) + 200, 50000);
@@ -801,11 +808,13 @@ function fetchAndRenderCompare(winStart, winEnd) {
     const until = new Date(winEnd).toISOString().slice(0, 19);
     Promise.all(hosts.map(name =>
         fetch('/api/history/' + encodeURIComponent(name) +
-              '?since=' + encodeURIComponent(since) + '&until=' + encodeURIComponent(until) + '&limit=' + limit)
+              '?since=' + encodeURIComponent(since) + '&until=' + encodeURIComponent(until) + '&limit=' + limit,
+              { signal })
             .then(r => r.json())
             .then(data => ({ name, data }))
-            .catch(() => null)
+            .catch(err => { if (err.name !== 'AbortError') {} return null; })
     )).then(results => {
+        if (signal.aborted) return;
         renderCompareChart(results.filter(Boolean), winStart, winEnd);
     }).catch(() => {});
 }
@@ -913,6 +922,12 @@ function renderCompareChart(hostDataList, winStart, winEnd) {
 }
 
 function fetchAndRender(name) {
+    // Cancel any previous in-flight history request so stale responses never
+    // overwrite the chart after the user has already switched host or scale.
+    if (_historyFetchAC) { _historyFetchAC.abort(); }
+    _historyFetchAC = new AbortController();
+    const signal = _historyFetchAC.signal;
+
     const zl     = ZOOM_LEVELS[_zoomIdx];
     const liveEnd = _windowEnd || Date.now();
     // Month scale uses calendar months: ticks start on the 1st, range ends at the selected/live time.
@@ -924,13 +939,14 @@ function fetchAndRender(name) {
     const since    = new Date(winStart).toISOString().slice(0, 19); // naive UTC prefix
     const until    = new Date(winEnd).toISOString().slice(0, 19);   // naive UTC prefix
     fetch('/api/history/' + encodeURIComponent(name) +
-                '?since=' + encodeURIComponent(since) + '&until=' + encodeURIComponent(until) + '&limit=' + limit)
+                '?since=' + encodeURIComponent(since) + '&until=' + encodeURIComponent(until) + '&limit=' + limit,
+          { signal })
         .then(r => r.json())
         .then(data => {
             ['latency', 'bandwidth'].forEach(tab => renderChart(name, tab, data, winStart, winEnd));
             updateZoomControls(winStart, winEnd);
         })
-        .catch(() => {});
+        .catch(err => { if (err.name !== 'AbortError') {} });
 }
 
 function updateZoomControls(winStart, winEnd) {
