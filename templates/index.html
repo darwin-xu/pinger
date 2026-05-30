@@ -226,7 +226,57 @@
         body { padding: 12px; }
         .form-grid { grid-template-columns: 1fr 1fr; }
     }
-    @media (max-width: 640px) {
+    @media (max-width: 900px) and (orientation: landscape) {
+        body { padding: 10px; }
+        .table-scroll { overflow-x: visible; }
+        #dashboard {
+            min-width: 0;
+            table-layout: fixed;
+        }
+        #dashboard th,
+        #dashboard td {
+            padding: 6px 5px;
+            font-size: 0.74rem;
+            white-space: nowrap;
+        }
+        #dashboard th:nth-child(1),
+        #dashboard td:nth-child(1),
+        #dashboard th:nth-child(4),
+        #dashboard td:nth-child(4),
+        #dashboard th:nth-child(5),
+        #dashboard td:nth-child(5),
+        #dashboard th:nth-child(6),
+        #dashboard td:nth-child(6) {
+            display: none;
+        }
+        #dashboard th:nth-child(2),
+        #dashboard td:nth-child(2) { width: 24px; }
+        #dashboard th:nth-child(3),
+        #dashboard td:nth-child(3) {
+            width: 14%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        #dashboard th:nth-child(7),
+        #dashboard td:nth-child(7),
+        #dashboard th:nth-child(8),
+        #dashboard td:nth-child(8),
+        #dashboard th:nth-child(10),
+        #dashboard td:nth-child(10) { width: 13%; }
+        #dashboard th:nth-child(9),
+        #dashboard td:nth-child(9),
+        #dashboard th:nth-child(11),
+        #dashboard td:nth-child(11),
+        #dashboard th:nth-child(12),
+        #dashboard td:nth-child(12) { width: 9%; }
+        #dashboard th:nth-child(13),
+        #dashboard td:nth-child(13) {
+            width: 88px;
+            text-align: right;
+        }
+        .btn-sm { padding: 2px 5px; }
+    }
+    @media (max-width: 640px), (max-width: 900px) and (orientation: portrait) {
         body { padding: 10px; }
         .page-header, .table-header { align-items: stretch; flex-direction: column; }
         .page-header .btn, .table-header .btn { width: 100%; }
@@ -235,6 +285,8 @@
         #dashboard { min-width: 0; border-collapse: separate; border-spacing: 0 8px; }
         #dashboard thead { display: none; }
         #dashboard tbody, #dashboard tr, #dashboard td { display: block; }
+        #dashboard tr.edit-row { display: none; }
+        #dashboard tr.edit-row.active { display: block; }
         #dashboard tr.data-row {
             background: var(--surface);
             border: 1px solid var(--border);
@@ -273,7 +325,8 @@
             font-size: 1rem;
         }
         #dashboard tr.data-row td.mobile-title::before { content: none; }
-        #dashboard tr.data-row td.mobile-provider:has(.val-dim),
+        #dashboard tr.data-row td.mobile-provider,
+        #dashboard tr.data-row td.host-col,
         #dashboard tr.data-row td.mobile-status,
         #dashboard tr.data-row td.mobile-index,
         #dashboard tr.data-row td.compare-col { display: none; }

@@ -176,8 +176,19 @@ class TestHistoryChartTemplate(unittest.TestCase):
         assert '<div class="table-scroll" aria-label="Server status table">' in src
         assert "#dashboard { min-width: 980px; }" in src
         assert "#dashboard { min-width: 0; border-collapse: separate; border-spacing: 0 8px; }" in src
-        assert "@media (max-width: 640px)" in src
+        assert "@media (max-width: 640px), (max-width: 900px) and (orientation: portrait)" in src
         assert ".page-header, .table-header { align-items: stretch; flex-direction: column; }" in src
+        assert "#dashboard tr.data-row td.mobile-provider," in src
+        assert "#dashboard tr.data-row td.host-col," in src
+        assert "#dashboard tr.edit-row { display: none; }" in src
+        assert "#dashboard tr.edit-row.active { display: block; }" in src
         assert "#dashboard tr.data-row td[data-label]::before" in src
         assert 'data-label="↓ Mbps"' in src
         assert 'data-label="↑ Mbps"' in src
+
+    def test_dashboard_has_landscape_compact_table(self):
+        src = self._template_source()
+        assert "@media (max-width: 900px) and (orientation: landscape)" in src
+        assert "#dashboard {\n            min-width: 0;\n            table-layout: fixed;\n        }" in src
+        assert "#dashboard th:nth-child(4)," in src
+        assert "#dashboard th:nth-child(5)," in src
