@@ -40,6 +40,7 @@ class ProbeEngine:
         self.history: dict = {}
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        self._config_changed = threading.Event()
         self._threads: list[threading.Thread] = []
         self._running = False
 
@@ -68,6 +69,7 @@ class ProbeEngine:
         """Hot-reload the config (e.g. after a web UI edit)."""
         self.cfg = cfg
         self._init_hosts()
+        self._config_changed.set()
 
     # ── Probe workers ─────────────────────────────────────────────────────
 
@@ -128,7 +130,8 @@ class ProbeEngine:
         while not self._stop.is_set():
             interval_hours = float(self.cfg.get("iperf3_interval", 1) or 0)
             if interval_hours <= 0:
-                self._stop.wait(timeout=60)
+                self._config_changed.wait(timeout=60)
+                self._config_changed.clear()
                 continue
 
             hosts = [
@@ -146,7 +149,8 @@ class ProbeEngine:
                         file=sys.stderr,
                     )
 
-            self._stop.wait(timeout=interval_hours * 3600)
+            self._config_changed.wait(timeout=interval_hours * 3600)
+            self._config_changed.clear()
 
     # ── Start / stop ──────────────────────────────────────────────────────
 
@@ -154,6 +158,7 @@ class ProbeEngine:
         if self._running:
             return
         self._stop.clear()
+        self._config_changed.clear()
         t1 = threading.Thread(target=self._ping_loop, daemon=True, name="ping-loop")
         t2 = threading.Thread(target=self._iperf3_loop, daemon=True, name="iperf3-loop")
         t1.start()
@@ -163,6 +168,7 @@ class ProbeEngine:
 
     def stop(self) -> None:
         self._stop.set()
+        self._config_changed.set()
         self._running = False
 
     @property

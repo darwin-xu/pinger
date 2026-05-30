@@ -170,3 +170,14 @@ class TestHistoryChartTemplate(unittest.TestCase):
         src = self._template_source()
         assert 'th.unit-label { text-transform: none; letter-spacing: 0; }' in src
         assert '<th class="unit-label">↓ Mbps</th><th class="unit-label">↑ Mbps</th>' in src
+
+    def test_dashboard_has_mobile_layout_support(self):
+        src = self._template_source()
+        assert '<div class="table-scroll" aria-label="Server status table">' in src
+        assert "#dashboard { min-width: 980px; }" in src
+        assert "#dashboard { min-width: 0; border-collapse: separate; border-spacing: 0 8px; }" in src
+        assert "@media (max-width: 640px)" in src
+        assert ".page-header, .table-header { align-items: stretch; flex-direction: column; }" in src
+        assert "#dashboard tr.data-row td[data-label]::before" in src
+        assert 'data-label="↓ Mbps"' in src
+        assert 'data-label="↑ Mbps"' in src

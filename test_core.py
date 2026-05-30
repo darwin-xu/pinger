@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -234,7 +235,6 @@ class TestEngineSnapshot(unittest.TestCase):
         inst = object.__new__(engine.ProbeEngine)
         inst.results = {"Tokyo": {"ping": {"avg": 10}}}
         inst.history = {"Tokyo": [10, 20]}
-        import threading
 
         inst._lock = threading.Lock()
 
@@ -246,6 +246,31 @@ class TestEngineSnapshot(unittest.TestCase):
         self.assertNotIn("tcp", inst.results["Tokyo"])
         self.assertEqual(inst.results["Tokyo"]["ping"]["avg"], 10)
         self.assertEqual(inst.history["Tokyo"], [10, 20])
+
+    def test_reload_config_wakes_periodic_iperf3_loop(self):
+        inst = object.__new__(engine.ProbeEngine)
+        inst.cfg = {"hosts": []}
+        inst.history = {}
+        inst.results = {}
+        inst._lock = threading.Lock()
+        inst._config_changed = threading.Event()
+
+        with patch.object(engine.ProbeEngine, "_init_hosts", return_value=None):
+            inst.reload_config({"iperf3_interval": 1, "hosts": []})
+
+        self.assertTrue(inst._config_changed.is_set())
+
+    def test_stop_wakes_periodic_iperf3_loop(self):
+        inst = object.__new__(engine.ProbeEngine)
+        inst._stop = threading.Event()
+        inst._config_changed = threading.Event()
+        inst._running = True
+
+        inst.stop()
+
+        self.assertTrue(inst._stop.is_set())
+        self.assertTrue(inst._config_changed.is_set())
+        self.assertFalse(inst.running)
 
 
 if __name__ == "__main__":

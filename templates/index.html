@@ -33,7 +33,14 @@
     .dot.off { background: var(--red); }
 
     /* ── Table ──────────────────────────────────────────── */
-    table { width: 100%; border-collapse: collapse; margin-bottom: 32px; }
+    .table-scroll {
+        width: 100%;
+        overflow-x: auto;
+        margin-bottom: 32px;
+        -webkit-overflow-scrolling: touch;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    #dashboard { min-width: 980px; }
     th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
     th { color: var(--cyan); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;
         background: var(--surface); position: sticky; top: 0; }
@@ -126,7 +133,7 @@
     /* ── Page header ─────────────────────────────────────── */
     .page-header {
         display: flex; justify-content: space-between; align-items: flex-start;
-        margin-bottom: 24px;
+        gap: 12px; margin-bottom: 24px;
     }
     .page-header-left h1 { margin-bottom: 4px; }
     .page-header-left .subtitle { margin-bottom: 0; }
@@ -140,7 +147,7 @@
     .modal-overlay.active { display: flex; }
     .modal {
         background: var(--surface); border: 1px solid var(--border);
-        border-radius: var(--radius); padding: 24px; min-width: 360px;
+        border-radius: var(--radius); padding: 24px; width: min(420px, calc(100vw - 24px));
         max-width: 90vw; max-height: 85vh; overflow-y: auto;
         position: relative;
     }
@@ -166,7 +173,7 @@
     /* ── Zoom controls ────────────────────────────────────── */
     .zoom-controls { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px; }
     .zoom-range-label { font-size:0.78rem; color:var(--text-dim); font-variant-numeric:tabular-nums; min-width:200px; }
-    .zoom-btns { display:flex; gap:3px; align-items:center; }
+    .zoom-btns { display:flex; gap:3px; align-items:center; overflow-x:auto; max-width:100%; padding-bottom:2px; -webkit-overflow-scrolling:touch; }
     .zoom-nav-btn {
         border:1px solid var(--border); background:var(--surface); color:var(--text-dim);
         cursor:pointer; font-size:0.85rem; padding:2px 9px; border-radius:4px; line-height:1.6;
@@ -219,6 +226,88 @@
         body { padding: 12px; }
         .form-grid { grid-template-columns: 1fr 1fr; }
     }
+    @media (max-width: 640px) {
+        body { padding: 10px; }
+        .page-header, .table-header { align-items: stretch; flex-direction: column; }
+        .page-header .btn, .table-header .btn { width: 100%; }
+        .subtitle { overflow-wrap: anywhere; }
+        .table-scroll { overflow-x: visible; }
+        #dashboard { min-width: 0; border-collapse: separate; border-spacing: 0 8px; }
+        #dashboard thead { display: none; }
+        #dashboard tbody, #dashboard tr, #dashboard td { display: block; }
+        #dashboard tr.data-row {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 8px;
+        }
+        #dashboard tr.data-row:hover td,
+        #dashboard tr.data-row.selected td { background: transparent !important; }
+        #dashboard tr.data-row.selected { border-color: var(--cyan); }
+        #dashboard tr.data-row td {
+            border-bottom: 0;
+            padding: 4px 6px;
+        }
+        #dashboard tr.data-row td[data-label] {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        #dashboard tr.data-row td[data-label]::before {
+            content: attr(data-label);
+            color: var(--text-dim);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            flex: 0 0 auto;
+        }
+        #dashboard tr.data-row td.mobile-title {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+            padding-bottom: 7px;
+            margin-bottom: 5px;
+            border-bottom: 1px solid var(--border);
+            font-size: 1rem;
+        }
+        #dashboard tr.data-row td.mobile-title::before { content: none; }
+        #dashboard tr.data-row td.mobile-provider:has(.val-dim),
+        #dashboard tr.data-row td.mobile-status,
+        #dashboard tr.data-row td.mobile-index,
+        #dashboard tr.data-row td.compare-col { display: none; }
+        #dashboard.compare-mode tr.data-row td.compare-col {
+            display: flex;
+            justify-content: flex-end;
+        }
+        #dashboard tr.data-row td.mobile-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding-top: 8px;
+            margin-top: 5px;
+            border-top: 1px solid var(--border);
+        }
+        .btn-sm { min-width: 32px; min-height: 32px; font-size: 1rem; }
+        .host-col { text-align: right; overflow-wrap: anywhere; }
+        .form-grid { grid-template-columns: 1fr; }
+        .edit-form { display: grid; grid-template-columns: 1fr; }
+        .edit-form .form-group { min-width: 0; }
+        .settings-grid { grid-template-columns: 1fr; }
+        .settings-grid input { width: 100%; text-align: left; }
+        .modal {
+            max-width: calc(100vw - 20px);
+            max-height: calc(100vh - 20px);
+            padding: 20px;
+        }
+        .zoom-range-label { min-width: 0; width: 100%; }
+        .zoom-controls { align-items: stretch; }
+        .zoom-btns { width: 100%; }
+        .zoom-nav-btn, .zoom-level-btn, .zoom-live-btn { flex: 0 0 auto; }
+        #chart-section { margin-left: -2px; margin-right: -2px; }
+        #chart-section canvas { max-width: 100%; }
+    }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -246,6 +335,7 @@
     <h2>Server Status</h2>
     <button class="btn btn-primary" onclick="openModal('modal-add')">＋ Add Host</button>
 </div>
+<div class="table-scroll" aria-label="Server status table">
 <table id="dashboard">
 <thead>
     <tr>
@@ -262,25 +352,25 @@
 {% set t = r.get('tcp', {}) %}
 {% set ip = r.get('iperf3', {}) %}
 <tr class="data-row" id="row-{{ loop.index0 }}" onclick="selectHost('{{ name }}', {{ loop.index0 }})">
-    <td class="val-dim">{{ loop.index }}</td>
+    <td class="val-dim mobile-index">{{ loop.index }}</td>
     <td class="compare-col" onclick="event.stopPropagation()"><input type="checkbox" class="compare-cb" value="{{ name }}" checked onchange="_triggerCompare()"></td>
-    <td><strong>{{ name }}</strong></td>
-    <td>{% if h.get('provider') %}<a href="{{ ('https://' + h.provider) if not h.provider.startswith('http') else h.provider }}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--cyan);text-decoration:none;font-size:0.85rem">{{ h.provider }}</a>{% else %}<span class="val-dim">—</span>{% endif %}</td>
-    <td class="host-col">{{ h.host }}</td>
-    <td class="icon">
+    <td class="mobile-title"><strong>{{ name }}</strong></td>
+    <td class="mobile-provider" data-label="Provider">{% if h.get('provider') %}<a href="{{ ('https://' + h.provider) if not h.provider.startswith('http') else h.provider }}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--cyan);text-decoration:none;font-size:0.85rem">{{ h.provider }}</a>{% else %}<span class="val-dim">—</span>{% endif %}</td>
+    <td class="host-col" data-label="Host">{{ h.host }}</td>
+    <td class="icon mobile-status">
         {% if not p %}?
         {% elif not p.get('success') or p.get('loss', 100) >= 50 %}<span class="val-red">✗</span>
         {% elif p.get('loss', 0) >= 1 or not t.get('success') %}<span class="val-yellow">⚠</span>
         {% else %}<span class="val-green">✓</span>
         {% endif %}
     </td>
-    <td>{% if p.get('success') and p.avg is not none %}{{ p.avg | fmt_duration }}{% elif p.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
-    <td>{% if p.get('success') and p.jitter is not none %}{{ p.jitter | fmt_duration }}{% elif p.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
-    <td>{{ ('%0.2f%%' % p.loss) if p.loss is defined and p.loss is not none else '—' }}</td>
-    <td>{% if t.get('success') and t.rtt is not none %}{{ t.rtt | fmt_duration }}{% elif t.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
-    <td>{% if ip.get('success') and ip.download_mbps is not none %}{{ '%0.0f' % ip.download_mbps }}{% elif ip.get('success') == false and ip.get('error') %}<span class="val-yellow err-tip" title="{{ ip.get('error')|e }}">⚠</span>{% else %}—{% endif %}</td>
-    <td>{{ ('%0.0f' % ip.upload_mbps) if ip.get('success') and ip.upload_mbps is not none else '—' }}</td>
-    <td onclick="event.stopPropagation()">
+    <td data-label="Ping">{% if p.get('success') and p.avg is not none %}{{ p.avg | fmt_duration }}{% elif p.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
+    <td data-label="Jitter">{% if p.get('success') and p.jitter is not none %}{{ p.jitter | fmt_duration }}{% elif p.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
+    <td data-label="Loss">{{ ('%0.2f%%' % p.loss) if p.loss is defined and p.loss is not none else '—' }}</td>
+    <td data-label="TCP">{% if t.get('success') and t.rtt is not none %}{{ t.rtt | fmt_duration }}{% elif t.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
+    <td data-label="↓ Mbps">{% if ip.get('success') and ip.download_mbps is not none %}{{ '%0.0f' % ip.download_mbps }}{% elif ip.get('success') == false and ip.get('error') %}<span class="val-yellow err-tip" title="{{ ip.get('error')|e }}">⚠</span>{% else %}—{% endif %}</td>
+    <td data-label="↑ Mbps">{{ ('%0.0f' % ip.upload_mbps) if ip.get('success') and ip.upload_mbps is not none else '—' }}</td>
+    <td class="mobile-actions" onclick="event.stopPropagation()">
         <button class="btn-sm btn-run" id="run-{{ loop.index0 }}" onclick="triggerIperf3({{ loop.index0 }})" title="Run bandwidth test now">⚡</button>
         <button class="btn-sm btn-edit" onclick="toggleEdit({{ loop.index0 }})">✎</button>
         <form method="POST" action="/hosts/{{ loop.index0 }}/delete" style="display:inline"
@@ -317,6 +407,7 @@
 {% endfor %}
 </tbody>
 </table>
+</div>
 
 <!-- ── History chart ────────────────────────────────────────────── -->
 <div id="chart-section" style="display:none; margin-bottom:32px">
@@ -1397,26 +1488,26 @@ function refreshDashboard() {
                 const cmpColor = COMPARE_COLORS[Math.min(i, COMPARE_COLORS.length - 1)];
                 const cmpDisabled = i >= COMPARE_COLORS.length ? ' disabled' : '';
                 const cmpIsChecked = cmpChecked[name] !== false;
-                html += '<td class="val-dim">' + (i+1) + '</td>';
+                html += '<td class="val-dim mobile-index">' + (i+1) + '</td>';
                 html += '<td class="compare-col" onclick="event.stopPropagation()">';
                 html += '<label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer">';
                 html += '<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:' + cmpColor + ';flex-shrink:0"></span>';
                 html += '<input type="checkbox" class="compare-cb" value="' + escAttr(name) + '"' + (cmpIsChecked ? ' checked' : '') + cmpDisabled + ' onchange="_triggerCompare()">';
                 html += '</label></td>';
-                html += '<td><strong>' + name + '</strong></td>';
+                html += '<td class="mobile-title"><strong>' + name + '</strong></td>';
                 const providerUrl = h.provider ? (h.provider.startsWith('http') ? h.provider : 'https://' + h.provider) : null;
-                html += '<td>' + (providerUrl ? '<a href="' + escAttr(providerUrl) + '" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none;font-size:0.85rem" onclick="event.stopPropagation()">' + escAttr(h.provider) + '</a>' : '<span class="val-dim">\u2014</span>') + '</td>';
-                html += '<td class="host-col">' + h.host + '</td>';
-                html += '<td class="icon">' + icon + '</td>';
+                html += '<td class="mobile-provider" data-label="Provider">' + (providerUrl ? '<a href="' + escAttr(providerUrl) + '" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none;font-size:0.85rem" onclick="event.stopPropagation()">' + escAttr(h.provider) + '</a>' : '<span class="val-dim">\u2014</span>') + '</td>';
+                html += '<td class="host-col" data-label="Host">' + h.host + '</td>';
+                html += '<td class="icon mobile-status">' + icon + '</td>';
                 const FAIL = '<span class="val-red">✗</span>';
-                html += '<td class="' + cls(avg, pw, pc) + '">'           + (p.success === false ? FAIL : fmt(avg, ' ms'))   + '</td>';
-                html += '<td class="' + cls(jitter, pw*0.3, pc*0.3) + '">'+ (p.success === false ? FAIL : fmt(jitter,' ms')) + '</td>';
-                html += '<td class="' + cls(loss, lw, lc) + '">'          + fmt(loss, '%')                                    + '</td>';
-                html += '<td class="' + cls(rtt, tw, tc) + '">'           + (t.success === false ? FAIL : fmt(rtt, ' ms'))   + '</td>';
+                html += '<td data-label="Ping" class="' + cls(avg, pw, pc) + '">'           + (p.success === false ? FAIL : fmt(avg, ' ms'))   + '</td>';
+                html += '<td data-label="Jitter" class="' + cls(jitter, pw*0.3, pc*0.3) + '">'+ (p.success === false ? FAIL : fmt(jitter,' ms')) + '</td>';
+                html += '<td data-label="Loss" class="' + cls(loss, lw, lc) + '">'          + fmt(loss, '%')                                    + '</td>';
+                html += '<td data-label="TCP" class="' + cls(rtt, tw, tc) + '">'           + (t.success === false ? FAIL : fmt(rtt, ' ms'))   + '</td>';
                 const dlCell = dl != null ? fmt(dl, '', 0) : ipErr ? '<span class="val-yellow err-tip" title="' + escAttr(ipErr) + '">⚠</span>' : '—';
-                html += '<td class="' + cls(dl, bw, bc, true) + '">' + dlCell + '</td>';
-                html += '<td class="' + cls(ul, bw, bc, true) + '">' + fmt(ul, '', 0) + '</td>';
-                html += '<td onclick="event.stopPropagation()">';
+                html += '<td data-label="↓ Mbps" class="' + cls(dl, bw, bc, true) + '">' + dlCell + '</td>';
+                html += '<td data-label="↑ Mbps" class="' + cls(ul, bw, bc, true) + '">' + fmt(ul, '', 0) + '</td>';
+                html += '<td class="mobile-actions" onclick="event.stopPropagation()">';
                 html += '<button class="btn-sm btn-run" id="run-'+i+'" onclick="triggerIperf3('+i+')" title="Run bandwidth test now">⚡</button> ';
                 html += '<button class="btn-sm btn-edit" onclick="toggleEdit('+i+')">✎</button> ';
                 html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(\'Delete '+safeName+'?\')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
