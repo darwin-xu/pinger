@@ -421,8 +421,8 @@
     <td data-label="Jitter">{% if p.get('success') and p.jitter is not none %}{{ p.jitter | fmt_duration }}{% elif p.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
     <td data-label="Loss">{{ ('%0.2f%%' % p.loss) if p.loss is defined and p.loss is not none else '—' }}</td>
     <td data-label="TCP">{% if t.get('success') and t.rtt is not none %}{{ t.rtt | fmt_duration }}{% elif t.get('success') == false %}<span class="val-red">✗</span>{% else %}—{% endif %}</td>
-    <td data-label="↓ Mbps">{% if ip.get('success') and ip.download_mbps is not none %}{{ '%0.0f' % ip.download_mbps }}{% elif ip.get('success') == false and ip.get('error') %}<span class="val-yellow err-tip" title="{{ ip.get('error')|e }}">⚠</span>{% else %}—{% endif %}</td>
-    <td data-label="↑ Mbps">{{ ('%0.0f' % ip.upload_mbps) if ip.get('success') and ip.upload_mbps is not none else '—' }}</td>
+    <td data-label="↓ Mbps">{% if ip.get('success') and ip.download_mbps is not none %}{{ '%0.0f' % ip.download_mbps }}{% elif ip.get('success') and ip.get('download_error') %}<span class="val-yellow err-tip" title="{{ ip.get('download_error')|e }}">—</span>{% elif ip.get('success') == false and ip.get('error') %}<span class="val-yellow err-tip" title="{{ ip.get('error')|e }}">⚠</span>{% else %}—{% endif %}</td>
+    <td data-label="↑ Mbps">{% if ip.get('success') and ip.upload_mbps is not none %}{{ '%0.0f' % ip.upload_mbps }}{% elif ip.get('success') and ip.get('upload_error') %}<span class="val-yellow err-tip" title="{{ ip.get('upload_error')|e }}">—</span>{% else %}—{% endif %}</td>
     <td class="mobile-actions" onclick="event.stopPropagation()">
         <button class="btn-sm btn-run" id="run-{{ loop.index0 }}" onclick="triggerIperf3({{ loop.index0 }})" title="Run bandwidth test now">⚡</button>
         <button class="btn-sm btn-edit" onclick="toggleEdit({{ loop.index0 }})">✎</button>
@@ -448,10 +448,6 @@
             <input name="ssh_port" type="number" value="{{ h.get('ssh_port', 22) }}"></div>
         <div class="form-group"><label>Password</label>
             <input name="password" type="password" autocomplete="new-password" value="{{ h.get('password', '') }}" placeholder="leave blank for key/agent"></div>
-        <div class="form-group"><label>iperf3</label>
-            <label style="display:flex;align-items:center;gap:8px;color:var(--text);font-size:0.9rem">
-                <input name="iperf3" type="checkbox" {% if h.get('iperf3') %}checked{% endif %}> Periodic bandwidth
-            </label></div>
         <button type="submit" class="btn btn-primary">Save</button>
         <button type="button" class="btn btn-secondary" onclick="toggleEdit({{ loop.index0 }})">Cancel</button>
     </form>
@@ -517,10 +513,6 @@
                     <input name="ssh_port" type="number" value="22"></div>
                 <div class="form-group"><label>Password (optional)</label>
                     <input name="password" type="password" autocomplete="new-password" placeholder="leave blank for key/agent"></div>
-                <div class="form-group"><label>iperf3</label>
-                    <label style="display:flex;align-items:center;gap:8px;color:var(--text);font-size:0.9rem">
-                        <input name="iperf3" type="checkbox" checked> Periodic bandwidth
-                    </label></div>
             </div>
             <br>
             <button type="submit" class="btn btn-primary">Add Host</button>
@@ -538,8 +530,8 @@
             <div class="settings-grid">
                 <label>Probe interval (s)</label>
                     <input name="probe_interval" type="number" value="{{ settings.probe_interval }}">
-                <label>iperf3 interval (h)</label>
-                    <input name="iperf3_interval" type="number" min="0" step="0.25" value="{{ settings.iperf3_interval }}">
+                <label>iperf3 interval (min)</label>
+                    <input name="iperf3_interval" type="number" min="0" step="1" value="{{ settings.iperf3_interval }}">
                 <label>Ping count</label>
                     <input name="ping_count" type="number" value="{{ settings.ping_count }}">
                 <label>iperf3 duration (s)</label>
@@ -598,6 +590,8 @@ let _chartMode = 'dedicated';     // 'dedicated' | 'compare'
 let _compareMetric = 'ping-avg';  // selected metric in compare mode
 const PROBE_INTERVAL_MS = {{ (settings.probe_interval | default(30)) * 1000 }};
 const GAP_THRESHOLD_MS = PROBE_INTERVAL_MS * 2;
+const IPERF3_INTERVAL_MS = {{ (settings.iperf3_interval | default(60)) * 60 * 1000 }};
+const BANDWIDTH_GAP_THRESHOLD_MS = IPERF3_INTERVAL_MS > 0 ? IPERF3_INTERVAL_MS * 2 : GAP_THRESHOLD_MS;
 const COMPARE_COLORS = ['#58a6ff', '#3fb950', '#ffa657', '#bc8cff', '#f85149', '#39d0d8', '#d29922'];
 const COMPARE_METRICS = [
     { id: 'ping-avg', label: 'Ping',    probe: 'ping', field: 'avg'    },
@@ -1203,7 +1197,7 @@ function sampleEndMs(row) {
     return new Date(row.lastTs || _ts(row)).getTime();
 }
 
-function pointsWithGaps(rows, valueFn) {
+function pointsWithGaps(rows, valueFn, gapThresholdMs = GAP_THRESHOLD_MS) {
     let prevEnd = null;
     return rows.map(row => {
         const start = sampleStartMs(row);
@@ -1211,7 +1205,7 @@ function pointsWithGaps(rows, valueFn) {
         const pt = {
             x: _ts(row),
             y: valueFn(row),
-            gapFromPrev: prevEnd != null && start - prevEnd > GAP_THRESHOLD_MS,
+            gapFromPrev: prevEnd != null && start - prevEnd > gapThresholdMs,
         };
         prevEnd = end;
         return pt;
@@ -1389,8 +1383,8 @@ function renderChart(name, tab, data, winStart, winEnd) {
             return;
         }
         datasets = [
-            lineDataset({ metricId: 'download', label: '\u2193 Download (Mbps)', data: pointsWithGaps(rows, r => r.success ? r.download_mbps : null), borderColor: CH.green, backgroundColor: 'rgba(63,185,80,0.08)' }),
-            lineDataset({ metricId: 'upload',   label: '\u2191 Upload (Mbps)',   data: pointsWithGaps(rows, r => r.success ? r.upload_mbps   : null), borderColor: CH.cyan,  backgroundColor: 'rgba(88,166,255,0.08)' }),
+            lineDataset({ metricId: 'download', label: '\u2193 Download (Mbps)', data: pointsWithGaps(rows, r => r.success ? r.download_mbps : null, BANDWIDTH_GAP_THRESHOLD_MS), borderColor: CH.green, backgroundColor: 'rgba(63,185,80,0.08)', borderWidth: 3 }),
+            lineDataset({ metricId: 'upload',   label: '\u2191 Upload (Mbps)',   data: pointsWithGaps(rows, r => r.success ? r.upload_mbps   : null, BANDWIDTH_GAP_THRESHOLD_MS), borderColor: CH.cyan,  backgroundColor: 'rgba(88,166,255,0.08)', borderWidth: 3 }),
         ];
         yScales = { y: { min: 0, title: { display: true, text: 'Mbps', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
 
@@ -1533,6 +1527,8 @@ function refreshDashboard() {
                 const dl      = ip.success ? ip.download_mbps : null;
                 const ul      = ip.success ? ip.upload_mbps   : null;
                 const ipErr   = (ip.success === false && ip.error) ? ip.error : null;
+                const dlErr   = (ip.success && ip.download_error) ? ip.download_error : null;
+                const ulErr   = (ip.success && ip.upload_error) ? ip.upload_error : null;
 
                 const safeName = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
                 const sel = (_selectedHost === name) ? ' selected' : '';
@@ -1557,9 +1553,10 @@ function refreshDashboard() {
                 html += '<td data-label="Jitter" class="' + cls(jitter, pw*0.3, pc*0.3) + '">'+ (p.success === false ? FAIL : fmt(jitter,' ms')) + '</td>';
                 html += '<td data-label="Loss" class="' + cls(loss, lw, lc) + '">'          + fmt(loss, '%')                                    + '</td>';
                 html += '<td data-label="TCP" class="' + cls(rtt, tw, tc) + '">'           + (t.success === false ? FAIL : fmt(rtt, ' ms'))   + '</td>';
-                const dlCell = dl != null ? fmt(dl, '', 0) : ipErr ? '<span class="val-yellow err-tip" title="' + escAttr(ipErr) + '">⚠</span>' : '—';
+                const dlCell = dl != null ? fmt(dl, '', 0) : dlErr ? '<span class="val-yellow err-tip" title="' + escAttr(dlErr) + '">—</span>' : ipErr ? '<span class="val-yellow err-tip" title="' + escAttr(ipErr) + '">⚠</span>' : '—';
+                const ulCell = ul != null ? fmt(ul, '', 0) : ulErr ? '<span class="val-yellow err-tip" title="' + escAttr(ulErr) + '">—</span>' : '—';
                 html += '<td data-label="↓ Mbps" class="' + cls(dl, bw, bc, true) + '">' + dlCell + '</td>';
-                html += '<td data-label="↑ Mbps" class="' + cls(ul, bw, bc, true) + '">' + fmt(ul, '', 0) + '</td>';
+                html += '<td data-label="↑ Mbps" class="' + cls(ul, bw, bc, true) + '">' + ulCell + '</td>';
                 html += '<td class="mobile-actions" onclick="event.stopPropagation()">';
                 html += '<button class="btn-sm btn-run" id="run-'+i+'" onclick="triggerIperf3('+i+')" title="Run bandwidth test now">⚡</button> ';
                 html += '<button class="btn-sm btn-edit" onclick="toggleEdit('+i+')">✎</button> ';

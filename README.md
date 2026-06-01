@@ -23,7 +23,7 @@ A tool that periodically probes multiple VPS servers with three complementary me
 │       │     └── ICMP via system ping → latency, jitter, loss│
 │       ├── TCP probe    (every N s, parallel)                │
 │       │     └── TCP connect to SSH port → handshake RTT     │
-│       └── iperf3 probe (every M h, sequential; 0 disables)  │
+│       └── iperf3 probe (every M min, sequential; 0 disables)│
 │             ├── SSH → auto-install iperf3 if missing        │
 │             ├── SSH → start iperf3 -s briefly               │
 │             ├── iperf3 client: upload + download test       │
@@ -33,7 +33,7 @@ A tool that periodically probes multiple VPS servers with three complementary me
 
 ### Key design decisions
 
-- **On-demand iperf3**: iperf3 only runs during the test window (~10–15 s) and is killed immediately after. Port 5201 stays closed the rest of the time.
+- **On-demand iperf3**: iperf3 only runs during the test window (~10–15 s) and is killed immediately after. Port 5201 stays closed the rest of the time. The probe waits for the remote server port to listen before starting the client and retries a failed upload/download direction once after restarting the remote server.
 - **Auto-install**: The iperf3 probe detects whether `iperf3` is installed on each VPS and installs it via `apt` automatically if missing. No manual `deploy_iperf3.sh` step required.
 - **Web config**: Hosts and settings live in `config.yaml` but are edited via the web UI. Changes apply immediately (hot-reload).
 
@@ -127,7 +127,6 @@ Use the **Add Host** form on the web page:
 | SSH User  | `root`            | |
 | SSH Port  | `22`              | |
 | SSH Key   | `~/.ssh/id_rsa`   | Optional; omit to use ssh-agent |
-| iperf3    | ☑                 | Uncheck to skip bandwidth tests |
 
 ### 4. Adjust settings (optional)
 
@@ -177,7 +176,7 @@ python3 -m unittest discover
 
 ```yaml
 probe_interval:   30    # seconds between ping + TCP cycles
-iperf3_interval:  1     # hours between iperf3 cycles; 0 disables periodic tests
+iperf3_interval:  60    # integer minutes between iperf3 cycles; 0 disables periodic tests
 ping_count:       10    # ICMP packets per probe run
 iperf3_duration:  5     # seconds per iperf3 direction
 iperf3_port:      5201  # port used during iperf3 tests
@@ -198,14 +197,13 @@ hosts:
     ssh_user: "root"
     ssh_port: 22
     ssh_key:  "~/.ssh/id_rsa"
-    iperf3:   true
 ```
 
 ### Tuning tips
 
 - Increase `probe_interval` (e.g. `60`) to reduce noise and network traffic.
-- Increase `iperf3_interval` to reduce bandwidth-test traffic, or set it to `0` to disable periodic iperf3 tests globally.
-- Set `iperf3: false` for VPS where you only want latency monitoring.
+- Increase `iperf3_interval` to reduce bandwidth-test traffic, or set it to `0` to disable periodic iperf3 tests globally. Any positive interval tests every configured host sequentially, one server at a time.
+- `/api/status` includes `scheduler.iperf3` with the scheduled hosts, last cycle timestamps, next due time, and last scheduler error for diagnosing periodic bandwidth tests.
 - Lower `bw_warn_mbps` / `bw_crit_mbps` for servers with limited bandwidth.
 - The TCP probe connects to `ssh_port`, doubling as an SSH availability check.
 
@@ -236,7 +234,7 @@ Query history directly:
 sqlite3 pinger.db "SELECT ts, data FROM metrics WHERE host='Tokyo-1' AND probe='ping' ORDER BY ts DESC LIMIT 10;"
 ```
 
-The history charts use `probe_interval` to identify missing probe windows. When adjacent samples are separated by more than two probe intervals, the connecting segment is drawn thinner and lighter so downtime or dashboard gaps are not mistaken for normal measurements. Y-axes are anchored at zero so charts show the full range from 0 to the observed maximum instead of zooming into only the observed min/max band. The TCP RTT failures legend shows the number of failed TCP probes in the current chart window and toggles the failure markers.
+The history charts use `probe_interval` to identify missing probe windows. When adjacent samples are separated by more than two probe intervals, the connecting segment is drawn thinner and lighter so downtime or dashboard gaps are not mistaken for normal measurements. Y-axes are anchored at zero so charts show the full range from 0 to the observed maximum instead of zooming into only the observed min/max band. For compatibility with older databases, iperf3 history is read by both the current host IP key and the display-name key. The TCP RTT failures legend shows the number of failed TCP probes in the current chart window and toggles the failure markers.
 On the 12h chart scale, x-axis labels include the date. On the 1mo scale, chart ticks align to the 1st of each month and the live range ends at the current time instead of a future month boundary.
 
 ---
@@ -249,4 +247,6 @@ On the 12h chart scale, x-axis labels include the date. On the 1mo scale, chart 
 | iperf3 error: "not installed locally" | iperf3 missing on your Mac | `brew install iperf3` |
 | iperf3 error: "auto-install failed" | sudo not available on VPS | SSH in and run `sudo apt install iperf3` manually |
 | iperf3 error: "SSH failed" | Key auth not set up | Ensure SSH key works: `ssh user@host` |
+| Download or upload Mbps shows `—` after a partial iperf3 success | That direction failed independently; download uses reverse mode (`iperf3 -R`) and can be blocked by firewall, NAT, provider policy, or a closed stream even when upload succeeds | Hover the `—` in the dashboard to see the direction-specific iperf3 error |
+| iperf3 error includes `remote server log` | The remote iperf3 server wrote diagnostic output before or during failure | Inspect `/tmp/pinger-iperf3-5201.log` on the VPS, replacing `5201` if you changed `iperf3_port` |
 | Dashboard not updating | Probe taking too long | Increase `probe_interval`; reduce `ping_count` |

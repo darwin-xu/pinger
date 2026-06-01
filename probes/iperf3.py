@@ -127,6 +127,69 @@ def _install_iperf3(client: paramiko.SSHClient) -> tuple[int, str]:
     return 1, "no supported package manager found (tried apt-get, dnf, yum, apk)"
 
 
+def _server_log_path(port: int) -> str:
+    return f"/tmp/pinger-iperf3-{port}.log"
+
+
+def _server_log_tail(client: paramiko.SSHClient, port: int) -> str:
+    rc, out = _exec(
+        client,
+        f"test -f {_server_log_path(port)} && tail -n 20 {_server_log_path(port)} || true",
+        timeout=8,
+    )
+    return out if rc == 0 else ""
+
+
+def _kill_server(client: paramiko.SSHClient) -> None:
+    _exec(client, "pkill -f 'iperf3 -s' 2>/dev/null || true")
+
+
+def _start_server(client: paramiko.SSHClient, port: int) -> tuple[bool, str]:
+    """Start remote iperf3 server and wait until it is listening."""
+    log_path = _server_log_path(port)
+    _kill_server(client)
+    _exec(client, f"rm -f {log_path} 2>/dev/null || true", timeout=8)
+    time.sleep(0.4)
+
+    rc, out = _exec(
+        client,
+        f"nohup iperf3 -s -p {port} >{log_path} 2>&1 & echo ok",
+    )
+    if rc != 0:
+        return False, f"failed to start iperf3 server: {out}"
+
+    deadline = time.monotonic() + 5
+    last_out = ""
+    while time.monotonic() < deadline:
+        rc, last_out = _exec(
+            client,
+            "if command -v ss >/dev/null 2>&1; then "
+            f"ss -ltn 2>/dev/null | grep -q ':{port} '; "
+            "elif command -v netstat >/dev/null 2>&1; then "
+            f"netstat -ltn 2>/dev/null | grep -q ':{port} '; "
+            "else "
+            "pgrep -f 'iperf3 -s' >/dev/null 2>&1; "
+            "fi",
+            timeout=8,
+        )
+        if rc == 0:
+            return True, ""
+        time.sleep(0.25)
+
+    log_tail = _server_log_tail(client, port)
+    detail = log_tail or last_out or "server did not become ready within 5s"
+    return False, f"iperf3 server did not become ready: {detail}"
+
+
+def _with_server_log(error: str | None, client: paramiko.SSHClient, port: int) -> str | None:
+    if not error:
+        return None
+    log_tail = _server_log_tail(client, port)
+    if log_tail:
+        return f"{error}; remote server log: {log_tail}"
+    return error
+
+
 def probe(host_config: dict, duration: int = 5, iperf3_port: int = 5201) -> dict:
     """Upload + download bandwidth test for *host_config*."""
     if not shutil.which("iperf3"):
@@ -153,22 +216,30 @@ def probe(host_config: dict, duration: int = 5, iperf3_port: int = 5201) -> dict
             if rc != 0:
                 return {"success": False, "error": f"auto-install failed: {out or '(no output)'}"}
 
-        # 2. Kill any stale server process
-        _exec(client, "pkill -f 'iperf3 -s' 2>/dev/null || true")
-        time.sleep(0.4)
-
-        # 3. Start iperf3 server in background
-        rc, out = _exec(
-            client,
-            f"nohup iperf3 -s -p {iperf3_port} >/dev/null 2>&1 & echo ok",
-        )
-        if rc != 0:
-            return {"success": False, "error": f"failed to start iperf3 server: {out}"}
-        time.sleep(1.5)
+        # 2 & 3. Start iperf3 server and wait until it is actually listening.
+        ok, err = _start_server(client, iperf3_port)
+        if not ok:
+            return {"success": False, "error": err}
 
         # 4 & 5. Run local iperf3 client (upload then download)
         upload_mbps,   ul_err = _run_client(host, iperf3_port, duration, reverse=False)
+        if upload_mbps is None:
+            ok, restart_err = _start_server(client, iperf3_port)
+            if ok:
+                upload_mbps, ul_err = _run_client(host, iperf3_port, duration, reverse=False)
+            else:
+                ul_err = f"{ul_err}; retry start failed: {restart_err}" if ul_err else restart_err
+
         download_mbps, dl_err = _run_client(host, iperf3_port, duration, reverse=True)
+        if download_mbps is None:
+            ok, restart_err = _start_server(client, iperf3_port)
+            if ok:
+                download_mbps, dl_err = _run_client(host, iperf3_port, duration, reverse=True)
+            else:
+                dl_err = f"{dl_err}; retry start failed: {restart_err}" if dl_err else restart_err
+
+        ul_err = _with_server_log(ul_err, client, iperf3_port)
+        dl_err = _with_server_log(dl_err, client, iperf3_port)
 
         if upload_mbps is None and download_mbps is None:
             errors = "; ".join(filter(None, [ul_err, dl_err]))
@@ -177,11 +248,16 @@ def probe(host_config: dict, duration: int = 5, iperf3_port: int = 5201) -> dict
                 "error": errors or "iperf3 client failed",
             }
 
-        return {
+        result = {
             "success":       True,
             "upload_mbps":   round(upload_mbps,   1) if upload_mbps   is not None else None,
             "download_mbps": round(download_mbps, 1) if download_mbps is not None else None,
         }
+        if ul_err:
+            result["upload_error"] = ul_err
+        if dl_err:
+            result["download_error"] = dl_err
+        return result
 
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -189,7 +265,7 @@ def probe(host_config: dict, duration: int = 5, iperf3_port: int = 5201) -> dict
     finally:
         # 6. Always kill the remote server and close connection
         try:
-            _exec(client, "pkill -f 'iperf3 -s' 2>/dev/null || true", timeout=8)
+            _kill_server(client)
         except Exception:
             pass
         try:

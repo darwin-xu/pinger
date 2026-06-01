@@ -6,7 +6,7 @@ import threading
 import time
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import yaml
 
@@ -18,9 +18,25 @@ from probes import tcp as tcp_probe
 CONFIG_PATH = "config.yaml"
 
 
+def interval_minutes(value: object, default: int = 60) -> int:
+    """Parse the periodic iperf3 interval as whole minutes."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    raise ValueError("iperf3_interval must be an integer number of minutes")
+
+
 def load_config(path: str | None = None) -> dict:
+    global CONFIG_PATH
+    if path is not None:
+        CONFIG_PATH = path
     try:
-        with open(path or CONFIG_PATH) as fh:
+        with open(CONFIG_PATH) as fh:
             return yaml.safe_load(fh) or {}
     except FileNotFoundError:
         return {"hosts": [], "thresholds": {}}
@@ -43,6 +59,16 @@ class ProbeEngine:
         self._config_changed = threading.Event()
         self._threads: list[threading.Thread] = []
         self._running = False
+        self._iperf3_state: dict = {
+            "enabled": False,
+            "thread_alive": False,
+            "interval_minutes": None,
+            "scheduled_hosts": [],
+            "last_cycle_started": None,
+            "last_cycle_finished": None,
+            "next_cycle_due": None,
+            "last_error": None,
+        }
 
         storage.init_db()
         self._init_hosts()
@@ -105,6 +131,10 @@ class ProbeEngine:
         with self._lock:
             self.results[name]["iperf3"] = {"ts": ts, **r}
 
+    def _set_iperf3_state(self, **updates: object) -> None:
+        with self._lock:
+            self._iperf3_state.update(updates)
+
     # ── Background loops ──────────────────────────────────────────────────
 
     def _ping_loop(self) -> None:
@@ -127,30 +157,67 @@ class ProbeEngine:
             self._stop.wait(timeout=interval)
 
     def _iperf3_loop(self) -> None:
+        self._set_iperf3_state(thread_alive=True)
         while not self._stop.is_set():
-            interval_hours = float(self.cfg.get("iperf3_interval", 1) or 0)
-            if interval_hours <= 0:
+            try:
+                minutes = interval_minutes(self.cfg.get("iperf3_interval", 60))
+                hosts = list(self.cfg.get("hosts", []))
+                host_names = [h.get("name", h.get("host")) for h in hosts]
+                if minutes <= 0:
+                    self._set_iperf3_state(
+                        enabled=False,
+                        thread_alive=True,
+                        interval_minutes=minutes,
+                        scheduled_hosts=host_names,
+                        next_cycle_due=None,
+                        last_error=None,
+                    )
+                    self._config_changed.wait(timeout=60)
+                    self._config_changed.clear()
+                    continue
+
+                started = datetime.utcnow()
+                self._set_iperf3_state(
+                    enabled=True,
+                    thread_alive=True,
+                    interval_minutes=minutes,
+                    scheduled_hosts=host_names,
+                    last_cycle_started=started.isoformat(),
+                    next_cycle_due=None,
+                    last_error=None,
+                )
+                for h in hosts:
+                    if self._stop.is_set():
+                        break
+                    try:
+                        self._probe_iperf3(h)
+                    except Exception as exc:
+                        msg = f"{h['name']}: {exc}"
+                        self._set_iperf3_state(last_error=msg)
+                        print(f"[iperf3 error] {msg}", file=sys.stderr)
+
+                finished = datetime.utcnow()
+                self._set_iperf3_state(
+                    last_cycle_finished=finished.isoformat(),
+                    next_cycle_due=(finished + timedelta(minutes=minutes)).isoformat(),
+                )
+                self._config_changed.wait(timeout=minutes * 60)
+                self._config_changed.clear()
+            except Exception as exc:
+                msg = str(exc)
+                self._set_iperf3_state(
+                    enabled=False,
+                    thread_alive=True,
+                    last_error=msg,
+                    next_cycle_due=None,
+                )
+                print(
+                    f"[iperf3 scheduler error] {msg}",
+                    file=sys.stderr,
+                )
                 self._config_changed.wait(timeout=60)
                 self._config_changed.clear()
-                continue
-
-            hosts = [
-                h for h in self.cfg.get("hosts", [])
-                if h.get("iperf3") is True
-            ]
-            for h in hosts:
-                if self._stop.is_set():
-                    break
-                try:
-                    self._probe_iperf3(h)
-                except Exception as exc:
-                    print(
-                        f"[iperf3 error] {h['name']}: {exc}",
-                        file=sys.stderr,
-                    )
-
-            self._config_changed.wait(timeout=interval_hours * 3600)
-            self._config_changed.clear()
+        self._set_iperf3_state(thread_alive=False)
 
     # ── Start / stop ──────────────────────────────────────────────────────
 
@@ -189,3 +256,7 @@ class ProbeEngine:
             }
             snap_h = {k: list(v) for k, v in self.history.items()}
         return snap_r, snap_h
+
+    def scheduler_state(self) -> dict:
+        with self._lock:
+            return {"iperf3": dict(self._iperf3_state)}

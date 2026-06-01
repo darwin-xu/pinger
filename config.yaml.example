@@ -1,5 +1,5 @@
 probe_interval: 30
-iperf3_interval: 1
+iperf3_interval: 60
 ping_count: 10
 iperf3_duration: 5
 iperf3_port: 5201
@@ -18,20 +18,17 @@ hosts:
   provider: cloud.google.com  # optional; cloud service provider URL
   ssh_user: darwin
   ssh_port: 22
-  iperf3: true
 - name: nube
   host: 64.118.147.86
   provider: nube.com.ar
   ssh_user: root
   ssh_port: 22
-  iperf3: true
   password: YOUR_SSH_PASSWORD  # optional; prefer SSH keys
 - name: nube-1
   host: 64.118.149.162
   provider: nube.com.ar
   ssh_user: root
   ssh_port: 22
-  iperf3: true
   password: YOUR_SSH_PASSWORD  # optional; prefer SSH keys
 - name: v1
   host: 64.176.61.229

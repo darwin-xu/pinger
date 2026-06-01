@@ -163,13 +163,30 @@ class TestHistoryChartTemplate(unittest.TestCase):
 
     def test_bandwidth_axis_starts_at_zero(self):
         src = self._template_source()
-        assert "iperf3 interval (h)" in src
+        assert "iperf3 interval (min)" in src
+        assert 'name="iperf3_interval" type="number" min="0" step="1"' in src
+        assert "const IPERF3_INTERVAL_MS = {{ (settings.iperf3_interval | default(60)) * 60 * 1000 }};" in src
+        assert "const BANDWIDTH_GAP_THRESHOLD_MS = IPERF3_INTERVAL_MS > 0 ? IPERF3_INTERVAL_MS * 2 : GAP_THRESHOLD_MS;" in src
+        assert "pointsWithGaps(rows, r => r.success ? r.download_mbps : null, BANDWIDTH_GAP_THRESHOLD_MS)" in src
+        assert "pointsWithGaps(rows, r => r.success ? r.upload_mbps   : null, BANDWIDTH_GAP_THRESHOLD_MS)" in src
+        assert "metricId: 'download'" in src and "borderWidth: 3" in src
         assert "yScales = { y: { min: 0, title: { display: true, text: 'Mbps'" in src
+        assert '<input name="iperf3" type="hidden" value="off">' not in src
+        assert "h.iperf3" not in src
 
     def test_dashboard_bandwidth_headers_preserve_mbps_case(self):
         src = self._template_source()
         assert 'th.unit-label { text-transform: none; letter-spacing: 0; }' in src
         assert '<th class="unit-label">↓ Mbps</th><th class="unit-label">↑ Mbps</th>' in src
+
+    def test_dashboard_bandwidth_dash_can_show_direction_error(self):
+        src = self._template_source()
+        assert "ip.get('download_error')" in src
+        assert "ip.get('upload_error')" in src
+        assert "const dlErr   = (ip.success && ip.download_error) ? ip.download_error : null;" in src
+        assert "const ulErr   = (ip.success && ip.upload_error) ? ip.upload_error : null;" in src
+        assert 'title="{{ ip.get(\'download_error\')|e }}">—</span>' in src
+        assert 'title="{{ ip.get(\'upload_error\')|e }}">—</span>' in src
 
     def test_dashboard_has_mobile_layout_support(self):
         src = self._template_source()

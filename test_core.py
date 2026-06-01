@@ -12,6 +12,7 @@ from unittest.mock import patch
 import app as app_module
 import checksum
 import engine
+from probes import iperf3 as iperf3_probe
 import storage
 
 
@@ -120,6 +121,79 @@ class StorageTestCase(unittest.TestCase):
         self.assertEqual(storage.latest("1.1.1.1", "ping")["avg"], 20)
 
 
+class Iperf3ProbeTestCase(unittest.TestCase):
+    def test_probe_preserves_partial_download_error(self):
+        class FakeClient:
+            def close(self):
+                pass
+
+        with (
+            patch.object(iperf3_probe.shutil, "which", return_value="/usr/bin/iperf3"),
+            patch.object(iperf3_probe, "_make_client", return_value=FakeClient()),
+            patch.object(
+                iperf3_probe,
+                "_exec",
+                side_effect=[
+                    (0, "/usr/bin/iperf3"),
+                    (0, ""),
+                ],
+            ),
+            patch.object(iperf3_probe, "_start_server", return_value=(True, "")),
+            patch.object(iperf3_probe, "_with_server_log", side_effect=lambda err, _client, _port: err),
+            patch.object(iperf3_probe.time, "sleep", return_value=None),
+            patch.object(
+                iperf3_probe,
+                "_run_client",
+                side_effect=[
+                    (123.45, None),
+                    (None, "download: unable to receive from server"),
+                    (None, "download: unable to receive from server"),
+                ],
+            ),
+        ):
+            result = iperf3_probe.probe(
+                {"host": "203.0.113.10", "ssh_user": "root"},
+                duration=5,
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["upload_mbps"], 123.5)
+        self.assertIsNone(result["download_mbps"])
+        self.assertEqual(result["download_error"], "download: unable to receive from server")
+
+    def test_probe_retries_download_after_restarting_server(self):
+        class FakeClient:
+            def close(self):
+                pass
+
+        with (
+            patch.object(iperf3_probe.shutil, "which", return_value="/usr/bin/iperf3"),
+            patch.object(iperf3_probe, "_make_client", return_value=FakeClient()),
+            patch.object(iperf3_probe, "_exec", side_effect=[(0, "/usr/bin/iperf3"), (0, "")]),
+            patch.object(iperf3_probe, "_start_server", side_effect=[(True, ""), (True, "")]) as start_server,
+            patch.object(iperf3_probe, "_with_server_log", side_effect=lambda err, _client, _port: err),
+            patch.object(
+                iperf3_probe,
+                "_run_client",
+                side_effect=[
+                    (100.0, None),
+                    (None, "download: Connection reset by peer"),
+                    (95.0, None),
+                ],
+            ),
+        ):
+            result = iperf3_probe.probe(
+                {"host": "203.0.113.10", "ssh_user": "root"},
+                duration=5,
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["upload_mbps"], 100.0)
+        self.assertEqual(result["download_mbps"], 95.0)
+        self.assertNotIn("download_error", result)
+        self.assertEqual(start_server.call_count, 2)
+
+
 class TestConfigPersistence(unittest.TestCase):
     def test_load_missing_config_returns_empty_schema(self):
         with tempfile.TemporaryDirectory() as td:
@@ -135,6 +209,27 @@ class TestConfigPersistence(unittest.TestCase):
             engine.save_config(cfg, str(path))
             self.assertEqual(engine.load_config(str(path)), cfg)
 
+    def test_load_config_updates_default_save_path(self):
+        old_path = engine.CONFIG_PATH
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                path = Path(td) / "custom.yaml"
+                path.write_text("hosts: []\nthresholds: {}\n")
+
+                engine.load_config(str(path))
+                engine.save_config({"hosts": [{"name": "Tokyo", "host": "1.2.3.4"}]})
+
+                self.assertIn("Tokyo", path.read_text())
+        finally:
+            engine.CONFIG_PATH = old_path
+
+    def test_interval_minutes_requires_integer_minutes(self):
+        self.assertEqual(engine.interval_minutes(None), 60)
+        self.assertEqual(engine.interval_minutes(3), 3)
+        self.assertEqual(engine.interval_minutes("3"), 3)
+        with self.assertRaises(ValueError):
+            engine.interval_minutes("3.5")
+
 
 class FakeEngine:
     running = True
@@ -147,6 +242,9 @@ class FakeEngine:
 
     def snapshot(self):
         return {"Tokyo": {"ping": {"success": True}}}, {"Tokyo": [1, 2, 3]}
+
+    def scheduler_state(self):
+        return {"iperf3": {"enabled": True, "thread_alive": True}}
 
     def reload_config(self, cfg):
         self.cfg = cfg
@@ -178,11 +276,27 @@ class TestAppApi(unittest.TestCase):
         self.assertEqual(
             calls,
             [
+                ("1.2.3.4", "iperf3", 7, "2026-01-01T00:00:00", None),
+                ("Tokyo", "iperf3", 7, "2026-01-01T00:00:00", None),
                 ("1.2.3.4", "ping", 7, "2026-01-01T00:00:00", None),
                 ("1.2.3.4", "tcp", 7, "2026-01-01T00:00:00", None),
-                ("1.2.3.4", "iperf3", 7, "2026-01-01T00:00:00", None),
             ],
         )
+
+    def test_history_merges_iperf3_by_ip_and_display_name(self):
+        def fake_recent(host, probe, limit=20, since=None, until=None):
+            if probe != "iperf3":
+                return []
+            if host == "1.2.3.4":
+                return [{"ts": "2026-01-02T00:00:00", "host_key": "ip"}]
+            if host == "Tokyo":
+                return [{"ts": "2026-01-01T00:00:00", "host_key": "name"}]
+            return []
+
+        with patch.object(app_module.storage, "recent", side_effect=fake_recent):
+            data = self.client.get("/api/history/Tokyo?limit=7").get_json()
+
+        self.assertEqual([row["host_key"] for row in data["iperf3"]], ["ip", "name"])
 
     def test_history_limit_is_capped(self):
         limits = []
@@ -195,6 +309,23 @@ class TestAppApi(unittest.TestCase):
             self.client.get("/api/history/1.2.3.4?limit=999999")
 
         self.assertEqual(limits, [50000, 50000, 50000])
+
+    def test_edit_host_drops_legacy_iperf3_field(self):
+        app_module.engine.cfg["hosts"][0]["iperf3"] = True
+
+        with patch.object(app_module, "save_config"):
+            resp = self.client.post(
+                "/hosts/0/edit",
+                data={
+                    "name": "Tokyo",
+                    "host": "1.2.3.4",
+                    "ssh_user": "root",
+                    "ssh_port": "22",
+                },
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertNotIn("iperf3", app_module.engine.cfg["hosts"][0])
 
     def test_version_uses_env_checksum_when_checksum_module_unavailable(self):
         old_compute = app_module.compute_repo_checksum
@@ -212,13 +343,13 @@ class TestAppApi(unittest.TestCase):
 
         self.assertEqual(data, {"checksum": "abc123", "server_start": "2026-01-01T00:00:00Z"})
 
-    def test_settings_accepts_iperf3_interval_hours(self):
+    def test_settings_accepts_integer_iperf3_interval_minutes(self):
         with patch.object(app_module, "save_config") as save_config:
             resp = self.client.post(
                 "/settings",
                 data={
                     "probe_interval": "30",
-                    "iperf3_interval": "0.5",
+                    "iperf3_interval": "15",
                     "ping_count": "10",
                     "iperf3_duration": "5",
                     "iperf3_port": "5201",
@@ -226,7 +357,8 @@ class TestAppApi(unittest.TestCase):
             )
 
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(app_module.engine.cfg["iperf3_interval"], 0.5)
+        self.assertEqual(app_module.engine.cfg["iperf3_interval"], 15)
+        self.assertIsInstance(app_module.engine.cfg["iperf3_interval"], int)
         save_config.assert_called_once()
 
 
@@ -271,6 +403,56 @@ class TestEngineSnapshot(unittest.TestCase):
         self.assertTrue(inst._stop.is_set())
         self.assertTrue(inst._config_changed.is_set())
         self.assertFalse(inst.running)
+
+    def test_iperf3_loop_runs_all_hosts_sequentially(self):
+        inst = object.__new__(engine.ProbeEngine)
+        inst.cfg = {
+            "iperf3_interval": 1,
+            "hosts": [
+                {"name": "first", "host": "1.2.3.4", "iperf3": False},
+                {"name": "second", "host": "5.6.7.8"},
+            ],
+        }
+        inst._stop = threading.Event()
+        inst._config_changed = threading.Event()
+        inst._lock = threading.Lock()
+        inst._iperf3_state = {}
+        calls = []
+
+        def fake_probe(host):
+            calls.append(host["name"])
+            if len(calls) == 2:
+                inst._stop.set()
+                inst._config_changed.set()
+
+        inst._probe_iperf3 = fake_probe
+
+        inst._iperf3_loop()
+
+        self.assertEqual(calls, ["first", "second"])
+        state = inst.scheduler_state()["iperf3"]
+        self.assertEqual(state["scheduled_hosts"], ["first", "second"])
+        self.assertEqual(state["interval_minutes"], 1)
+
+    def test_iperf3_loop_reports_bad_interval_without_exiting(self):
+        inst = object.__new__(engine.ProbeEngine)
+        inst.cfg = {"iperf3_interval": "3.5", "hosts": []}
+        inst._stop = threading.Event()
+        inst._config_changed = threading.Event()
+        inst._lock = threading.Lock()
+        inst._iperf3_state = {}
+
+        def stop_after_wait(timeout):
+            inst._stop.set()
+            return False
+
+        inst._config_changed.wait = stop_after_wait
+
+        inst._iperf3_loop()
+
+        state = inst.scheduler_state()["iperf3"]
+        self.assertIn("integer number of minutes", state["last_error"])
+        self.assertFalse(state["thread_alive"])
 
 
 if __name__ == "__main__":

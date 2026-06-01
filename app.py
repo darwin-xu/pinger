@@ -42,6 +42,18 @@ def _cfg() -> dict:
     return engine.cfg
 
 
+def _merge_recent(*series: list[dict], limit: int) -> list[dict]:
+    rows_by_ts = {}
+    for rows in series:
+        for row in rows:
+            rows_by_ts[row.get("ts")] = row
+    return sorted(
+        rows_by_ts.values(),
+        key=lambda row: row.get("ts") or "",
+        reverse=True,
+    )[:limit]
+
+
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -56,7 +68,7 @@ def index():
         history=snap_h,
         settings={
             "probe_interval": cfg.get("probe_interval", 30),
-            "iperf3_interval": cfg.get("iperf3_interval", 1),
+            "iperf3_interval": cfg.get("iperf3_interval", 60),
             "ping_count": cfg.get("ping_count", 10),
             "iperf3_duration": cfg.get("iperf3_duration", 5),
             "iperf3_port": cfg.get("iperf3_port", 5201),
@@ -76,6 +88,7 @@ def api_status():
         thresholds=cfg.get("thresholds", {}),
         results=snap_r,
         history=snap_h,
+        scheduler=engine.scheduler_state(),
         running=engine.running,
     )
 
@@ -97,8 +110,6 @@ def add_host():
     password = request.form.get("password", "").strip()
     if password:
         host_entry["password"] = password
-    host_entry["iperf3"] = request.form.get("iperf3") == "on"
-
     if "hosts" not in cfg:
         cfg["hosts"] = []
     cfg["hosts"].append(host_entry)
@@ -128,7 +139,6 @@ def edit_host(idx: int):
             hosts[idx]["password"] = password
         else:
             hosts[idx].pop("password", None)
-        hosts[idx]["iperf3"] = request.form.get("iperf3") == "on"
         save_config(cfg)
         engine.reload_config(cfg)
     return redirect(url_for("index"))
@@ -176,17 +186,21 @@ def api_version():
 def api_history(host: str):
     # Resolve display name → IP so history is stable across renames
     cfg = _cfg()
-    host_ip = next(
-        (h["host"] for h in cfg.get("hosts", []) if h["name"] == host),
-        host,  # fall back to the value itself (e.g. direct IP lookup)
-    )
+    matched = next((h for h in cfg.get("hosts", []) if h["name"] == host), None)
+    host_ip = matched["host"] if matched else host
+    host_name = matched["name"] if matched else host
     limit = min(request.args.get("limit", 1000, type=int), 50000)
     since = request.args.get("since") or None
     until = request.args.get("until") or None
+    iperf3_by_ip = storage.recent(host_ip, "iperf3", limit=limit, since=since, until=until)
+    iperf3_by_name = (
+        storage.recent(host_name, "iperf3", limit=limit, since=since, until=until)
+        if host_name != host_ip else []
+    )
     return jsonify(
         ping=storage.recent(host_ip, "ping", limit=limit, since=since, until=until),
         tcp=storage.recent(host_ip, "tcp",  limit=limit, since=since, until=until),
-        iperf3=storage.recent(host_ip, "iperf3", limit=limit, since=since, until=until),
+        iperf3=_merge_recent(iperf3_by_ip, iperf3_by_name, limit=limit),
     )
 
 
@@ -201,7 +215,7 @@ def update_settings():
             cfg[key] = int(val)
     val = request.form.get("iperf3_interval")
     if val is not None:
-        cfg["iperf3_interval"] = float(val)
+        cfg["iperf3_interval"] = int(val)
 
     if "thresholds" not in cfg:
         cfg["thresholds"] = {}
