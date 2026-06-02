@@ -1382,9 +1382,12 @@ function renderChart(name, tab, data, winStart, winEnd) {
             if (bctx) bctx.getContext('2d').clearRect(0, 0, 9999, 9999);
             return;
         }
+        const downloadAvg = computeAvg(rows, 'download_mbps');
+        const uploadAvg = computeAvg(rows, 'upload_mbps');
+        const bwLabel = (name, avg) => avg != null ? name + ' avg: ' + fmtNum(avg) + ' Mbps' : name + ' (Mbps)';
         datasets = [
-            lineDataset({ metricId: 'download', label: '\u2193 Download (Mbps)', data: pointsWithGaps(rows, r => r.success ? r.download_mbps : null, BANDWIDTH_GAP_THRESHOLD_MS), borderColor: CH.green, backgroundColor: 'rgba(63,185,80,0.08)', borderWidth: 3 }),
-            lineDataset({ metricId: 'upload',   label: '\u2191 Upload (Mbps)',   data: pointsWithGaps(rows, r => r.success ? r.upload_mbps   : null, BANDWIDTH_GAP_THRESHOLD_MS), borderColor: CH.cyan,  backgroundColor: 'rgba(88,166,255,0.08)', borderWidth: 3 }),
+            lineDataset({ metricId: 'download', label: '\u2193 ' + bwLabel('Download', downloadAvg), data: pointsWithGaps(rows, r => r.success ? r.download_mbps : null, BANDWIDTH_GAP_THRESHOLD_MS), borderColor: CH.green, backgroundColor: 'rgba(63,185,80,0.08)', borderWidth: 2 }),
+            lineDataset({ metricId: 'upload',   label: '\u2191 ' + bwLabel('Upload', uploadAvg),     data: pointsWithGaps(rows, r => r.success ? r.upload_mbps   : null, BANDWIDTH_GAP_THRESHOLD_MS), borderColor: CH.cyan,  backgroundColor: 'rgba(88,166,255,0.08)', borderWidth: 2 }),
         ];
         yScales = { y: { min: 0, title: { display: true, text: 'Mbps', color: CH.dim }, ticks: { color: CH.dim }, grid: { color: CH.border } } };
 
@@ -1447,9 +1450,15 @@ function renderChart(name, tab, data, winStart, winEnd) {
                     callbacks: tab === 'latency' ? {
                         label: ctx => {
                             if (ctx.dataset.metricId === 'loss') return 'Loss: ' + fmtNum(ctx.parsed.y) + '%';
-                            const metricNames = { 'ping-avg': 'Ping avg', 'jitter': 'Jitter avg', 'tcp-rtt': 'TCP RTT avg' };
+                            const metricNames = { 'ping-avg': 'Ping', 'jitter': 'Jitter', 'tcp-rtt': 'TCP RTT' };
                             const metric = metricNames[ctx.dataset.metricId] || ctx.dataset.label;
                             return metric + ': ' + fmtMs(ctx.parsed.y);
+                        },
+                    } : tab === 'bandwidth' ? {
+                        label: ctx => {
+                            const metricNames = { download: 'Download', upload: 'Upload' };
+                            const metric = metricNames[ctx.dataset.metricId] || ctx.dataset.label;
+                            return metric + ': ' + fmtNum(ctx.parsed.y) + ' Mbps';
                         },
                     } : {},
                 },

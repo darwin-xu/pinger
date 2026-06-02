@@ -167,9 +167,14 @@ class TestHistoryChartTemplate(unittest.TestCase):
         assert 'name="iperf3_interval" type="number" min="0" step="1"' in src
         assert "const IPERF3_INTERVAL_MS = {{ (settings.iperf3_interval | default(60)) * 60 * 1000 }};" in src
         assert "const BANDWIDTH_GAP_THRESHOLD_MS = IPERF3_INTERVAL_MS > 0 ? IPERF3_INTERVAL_MS * 2 : GAP_THRESHOLD_MS;" in src
+        assert "const downloadAvg = computeAvg(rows, 'download_mbps');" in src
+        assert "const uploadAvg = computeAvg(rows, 'upload_mbps');" in src
+        assert "name + ' avg: ' + fmtNum(avg) + ' Mbps'" in src
+        assert "label: '\\u2193 ' + bwLabel('Download', downloadAvg)" in src
+        assert "label: '\\u2191 ' + bwLabel('Upload', uploadAvg)" in src
         assert "pointsWithGaps(rows, r => r.success ? r.download_mbps : null, BANDWIDTH_GAP_THRESHOLD_MS)" in src
         assert "pointsWithGaps(rows, r => r.success ? r.upload_mbps   : null, BANDWIDTH_GAP_THRESHOLD_MS)" in src
-        assert "metricId: 'download'" in src and "borderWidth: 3" in src
+        assert "metricId: 'download'" in src and "borderWidth: 2" in src
         assert "yScales = { y: { min: 0, title: { display: true, text: 'Mbps'" in src
         assert '<input name="iperf3" type="hidden" value="off">' not in src
         assert "h.iperf3" not in src
@@ -187,6 +192,13 @@ class TestHistoryChartTemplate(unittest.TestCase):
         assert "const ulErr   = (ip.success && ip.upload_error) ? ip.upload_error : null;" in src
         assert 'title="{{ ip.get(\'download_error\')|e }}">—</span>' in src
         assert 'title="{{ ip.get(\'upload_error\')|e }}">—</span>' in src
+
+    def test_chart_tooltips_show_point_values_not_average_labels(self):
+        src = self._template_source()
+        assert "const metricNames = { 'ping-avg': 'Ping', 'jitter': 'Jitter', 'tcp-rtt': 'TCP RTT' };" in src
+        assert "const metricNames = { download: 'Download', upload: 'Upload' };" in src
+        assert "return metric + ': ' + fmtNum(ctx.parsed.y) + ' Mbps';" in src
+        assert "const metricNames = { 'ping-avg': 'Ping avg', 'jitter': 'Jitter avg', 'tcp-rtt': 'TCP RTT avg' };" not in src
 
     def test_dashboard_has_mobile_layout_support(self):
         src = self._template_source()
