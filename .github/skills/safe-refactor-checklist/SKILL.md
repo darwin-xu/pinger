@@ -1,10 +1,9 @@
 ---
+name: safe-refactor-checklist
 description: "Run this checklist before merging a refactor: tests, docs, thread-safety, and CI-safe verifications."
-name: "safe-refactor-checklist"
+disable-model-invocation: true
 argument-hint: "target file(s) or 'all'"
-agent: "agent"
 ---
-
 Run a compact, reproducible checklist to validate a refactor. Supply a file path or `all`.
 
 Checklist (actionable steps):

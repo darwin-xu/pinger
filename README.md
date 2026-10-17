@@ -137,8 +137,15 @@ Scroll down to the **Settings** section on the web page to change probe interval
 ## Deploy Web UI
 
 ```bash
-./deploy.sh root@ubuntu-1.local
+./deploy.sh              # target 1: darwin@ubuntu-1.local (default)
+./deploy.sh -t 2         # target 2: root@ubuntu-a.local
+./deploy.sh -f -t 2      # force restart even if no server-affecting files changed
+./deploy.sh user@host    # explicit host (overrides -t)
 ```
+
+`-t`/`--target` selects the deployment host: `1` for the old `darwin@ubuntu-1.local` (default) or `2` for the new `root@ubuntu-a.local`.
+
+Each run first prepares the host: it creates `~/pinger` and installs `rsync`, `python3`, and `python3-venv` via `apt` if they are missing (this needs sudo on the remote). A host without a virtual environment is always fully built, even when no files changed. SSH connections are shared across steps, so a password-only host asks for the password once per run. Setting up key-based login (`ssh-copy-id root@ubuntu-a.local`) avoids the prompt entirely.
 
 `deploy.sh` syncs the same deployable include list used by the runtime checksum. Inspect it with:
 
