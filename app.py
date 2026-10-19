@@ -36,10 +36,20 @@ engine: ProbeEngine | None = None
 # Server start timestamp (ISO 8601 UTC) — set in main()
 server_start: str | None = None
 
+PUBLIC_HOST_FIELDS = ("name", "host", "ssh_user", "ssh_port", "provider")
+
 
 def _cfg() -> dict:
     assert engine is not None
     return engine.cfg
+
+
+def _public_hosts(hosts: list[dict]) -> list[dict]:
+    """Host fields safe to send to the browser (whitelist, never credentials)."""
+    return [
+        {k: h[k] for k in PUBLIC_HOST_FIELDS if k in h}
+        for h in hosts
+    ]
 
 
 def _merge_recent(*series: list[dict], limit: int) -> list[dict]:
@@ -84,7 +94,7 @@ def api_status():
     cfg = _cfg()
     snap_r, snap_h = engine.snapshot()
     return jsonify(
-        hosts=cfg.get("hosts", []),
+        hosts=_public_hosts(cfg.get("hosts", [])),
         thresholds=cfg.get("thresholds", {}),
         results=snap_r,
         history=snap_h,
@@ -107,9 +117,6 @@ def add_host():
     provider = request.form.get("provider", "").strip()
     if provider:
         host_entry["provider"] = provider
-    password = request.form.get("password", "").strip()
-    if password:
-        host_entry["password"] = password
     if "hosts" not in cfg:
         cfg["hosts"] = []
     cfg["hosts"].append(host_entry)
@@ -134,11 +141,6 @@ def edit_host(idx: int):
             hosts[idx]["provider"] = provider
         else:
             hosts[idx].pop("provider", None)
-        password = request.form.get("password", "").strip()
-        if password:
-            hosts[idx]["password"] = password
-        else:
-            hosts[idx].pop("password", None)
         save_config(cfg)
         engine.reload_config(cfg)
     return redirect(url_for("index"))

@@ -6,6 +6,7 @@ import os
 import tempfile
 import threading
 import unittest
+from html.parser import HTMLParser
 from pathlib import Path
 from unittest.mock import patch
 
@@ -193,6 +194,22 @@ class Iperf3ProbeTestCase(unittest.TestCase):
         self.assertNotIn("download_error", result)
         self.assertEqual(start_server.call_count, 2)
 
+    def test_probe_connects_with_keys_even_if_config_has_password(self):
+        with (
+            patch.object(iperf3_probe.shutil, "which", return_value="/usr/bin/iperf3"),
+            patch.object(iperf3_probe.paramiko, "SSHClient") as ssh_client,
+        ):
+            ssh_client.return_value.connect.side_effect = OSError("no route")
+            result = iperf3_probe.probe(
+                {"host": "203.0.113.10", "ssh_user": "root", "password": "hunter2"},
+            )
+
+        self.assertFalse(result["success"])
+        kwargs = ssh_client.return_value.connect.call_args.kwargs
+        self.assertNotIn("password", kwargs)
+        self.assertNotIn("look_for_keys", kwargs)
+        self.assertNotIn("allow_agent", kwargs)
+
 
 class TestConfigPersistence(unittest.TestCase):
     def test_load_missing_config_returns_empty_schema(self):
@@ -223,12 +240,46 @@ class TestConfigPersistence(unittest.TestCase):
         finally:
             engine.CONFIG_PATH = old_path
 
+    def test_load_config_strips_legacy_host_passwords(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "config.yaml"
+            path.write_text(
+                "hosts:\n"
+                "- name: Tokyo\n  host: 1.2.3.4\n  ssh_user: root\n  password: hunter2\n"
+                "- name: Osaka\n  host: 5.6.7.8\n"
+            )
+            cfg = engine.load_config(str(path))
+
+        self.assertEqual(
+            cfg["hosts"],
+            [
+                {"name": "Tokyo", "host": "1.2.3.4", "ssh_user": "root"},
+                {"name": "Osaka", "host": "5.6.7.8"},
+            ],
+        )
+
     def test_interval_minutes_requires_integer_minutes(self):
         self.assertEqual(engine.interval_minutes(None), 60)
         self.assertEqual(engine.interval_minutes(3), 3)
         self.assertEqual(engine.interval_minutes("3"), 3)
         with self.assertRaises(ValueError):
             engine.interval_minutes("3.5")
+
+
+class _RowAttrParser(HTMLParser):
+    """Collects the first data-row <tr> attributes and its delete-form onsubmit."""
+
+    def __init__(self):
+        super().__init__()
+        self.row_attrs: dict = {}
+        self.form_onsubmit = ""
+
+    def handle_starttag(self, tag, attrs):
+        d = dict(attrs)
+        if tag == "tr" and "data-row" in (d.get("class") or "") and not self.row_attrs:
+            self.row_attrs = d
+        elif tag == "form" and "onsubmit" in d and not self.form_onsubmit:
+            self.form_onsubmit = d["onsubmit"]
 
 
 class FakeEngine:
@@ -326,6 +377,73 @@ class TestAppApi(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 302)
         self.assertNotIn("iperf3", app_module.engine.cfg["hosts"][0])
+
+    def test_status_only_exposes_whitelisted_host_fields(self):
+        app_module.engine.cfg["hosts"][0].update(
+            {"ssh_user": "root", "ssh_port": 22, "provider": "x.com",
+             "password": "hunter2", "ssh_key": "~/.ssh/id_rsa"}
+        )
+
+        resp = self.client.get("/api/status")
+
+        self.assertEqual(
+            resp.get_json()["hosts"],
+            [{"name": "Tokyo", "host": "1.2.3.4", "ssh_user": "root",
+              "ssh_port": 22, "provider": "x.com"}],
+        )
+        self.assertNotIn(b"hunter2", resp.data)
+
+    def test_add_host_ignores_submitted_password(self):
+        with patch.object(app_module, "save_config"):
+            self.client.post(
+                "/hosts/add",
+                data={"name": "Osaka", "host": "5.6.7.8", "ssh_user": "root",
+                      "ssh_port": "22", "password": "hunter2"},
+            )
+
+        self.assertNotIn("password", app_module.engine.cfg["hosts"][-1])
+
+    def test_edit_host_removes_existing_password(self):
+        app_module.engine.cfg["hosts"][0]["password"] = "hunter2"
+
+        with patch.object(app_module, "save_config"):
+            self.client.post(
+                "/hosts/0/edit",
+                data={"name": "Tokyo", "host": "1.2.3.4", "ssh_user": "root",
+                      "ssh_port": "22", "password": "hunter2"},
+            )
+
+        self.assertNotIn("password", app_module.engine.cfg["hosts"][0])
+
+    def test_dashboard_has_no_password_fields(self):
+        with patch.object(app_module.engine, "snapshot", return_value=({}, {})):
+            resp = self.client.get("/")
+        html = resp.get_data(as_text=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('name="ssh_port"', html)
+        self.assertNotIn('name="password"', html)
+
+    def test_dashboard_inline_handlers_cannot_be_broken_out_of(self):
+        evil = "x');alert(1);//\"><script>alert(2)</script>"
+        app_module.engine.cfg["hosts"][0]["name"] = evil
+
+        with patch.object(app_module.engine, "snapshot", return_value=({}, {})):
+            resp = self.client.get("/")
+        html = resp.get_data(as_text=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("<script>alert(2)</script>", html)
+        parser = _RowAttrParser()
+        parser.feed(html)
+        # The row keeps exactly its own attributes and the handler holds one
+        # JS string literal: no raw quote from the host name survives.
+        self.assertEqual(set(parser.row_attrs), {"class", "id", "onclick"})
+        self.assertTrue(parser.row_attrs["onclick"].startswith('selectHost("x\\u0027);alert(1);//'))
+        self.assertTrue(parser.row_attrs["onclick"].endswith(", 0)"))
+        self.assertNotIn("'", parser.row_attrs["onclick"])
+        self.assertNotIn("'", parser.form_onsubmit)
+        self.assertTrue(parser.form_onsubmit.startswith('return confirm("Delete x\\u0027);alert(1);//'))
 
     def test_version_uses_env_checksum_when_checksum_module_unavailable(self):
         old_compute = app_module.compute_repo_checksum

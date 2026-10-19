@@ -10,7 +10,7 @@ Flow per test cycle
 6. SSH → kill iperf3 -s (cleanup, same connection)
 
 Port 5201 is only open for ~(2 * duration + 5) seconds per cycle.
-Auth: password if provided in host config, otherwise key/agent.
+Auth: SSH key / ssh-agent only (no password authentication).
 """
 from __future__ import annotations
 
@@ -22,30 +22,21 @@ import time
 import paramiko
 
 
-def _make_client(
-    user: str,
-    host: str,
-    port: int,
-    password: str | None = None,
-) -> paramiko.SSHClient:
+def _make_client(user: str, host: str, port: int) -> paramiko.SSHClient:
     """Return a connected SSHClient.
 
-    Uses password auth if *password* is given; otherwise falls back to
-    the running ssh-agent and default key files (~/.ssh/id_rsa etc.).
+    Authenticates with the running ssh-agent and default key files
+    (~/.ssh/id_rsa, id_ecdsa, id_ed25519), which paramiko tries automatically.
     """
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    kwargs: dict = dict(
+    client.connect(
         hostname=host,
         port=port,
         username=user,
         timeout=10,
         banner_timeout=15,
     )
-    if password:
-        kwargs.update(password=password, look_for_keys=False, allow_agent=False)
-    # else: paramiko tries agent + ~/.ssh/id_rsa, id_ecdsa, id_ed25519 automatically
-    client.connect(**kwargs)
     return client
 
 
@@ -198,13 +189,12 @@ def probe(host_config: dict, duration: int = 5, iperf3_port: int = 5201) -> dict
             "error": "iperf3 not installed locally — run: brew install iperf3",
         }
 
-    host     = host_config["host"]
-    user     = host_config["ssh_user"]
-    port     = host_config.get("ssh_port", 22)
-    password = host_config.get("password") or None
+    host = host_config["host"]
+    user = host_config["ssh_user"]
+    port = host_config.get("ssh_port", 22)
 
     try:
-        client = _make_client(user, host, port, password)
+        client = _make_client(user, host, port)
     except Exception as exc:
         return {"success": False, "error": f"SSH connect failed: {exc}"}
 

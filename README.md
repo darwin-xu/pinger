@@ -87,7 +87,7 @@ Color coding:
 **Local machine:**
 - Python 3.11+
 - `iperf3` binary — `brew install iperf3` (macOS) or `sudo apt install iperf3` (Linux)
-- SSH key-based access to all VPS targets
+- SSH key-based access to all VPS targets (password authentication is not supported; use `ssh-copy-id user@host` or ssh-agent)
 
 **Each VPS:**
 - Ubuntu / Debian

@@ -37,9 +37,15 @@ def load_config(path: str | None = None) -> dict:
         CONFIG_PATH = path
     try:
         with open(CONFIG_PATH) as fh:
-            return yaml.safe_load(fh) or {}
+            cfg = yaml.safe_load(fh) or {}
     except FileNotFoundError:
         return {"hosts": [], "thresholds": {}}
+    # Password auth is unsupported (SSH keys/agent only); drop any legacy
+    # secrets so they are never served and are purged on the next save.
+    for h in cfg.get("hosts") or []:
+        if isinstance(h, dict):
+            h.pop("password", None)
+    return cfg
 
 
 def save_config(cfg: dict, path: str | None = None) -> None:

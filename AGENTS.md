@@ -39,7 +39,8 @@ This file helps AI coding agents work effectively in this repository.
 - Thread safety: use ProbeEngine.snapshot() for reads rather than accessing live mutable state.
 - Host identity: persistence is keyed by host IP in storage; UI displays host name.
 - iperf3 behavior: server is started on demand and stopped after each run.
-- Optional host passwords may exist in config; avoid logging or exposing secrets.
+- Auth is SSH key/agent only. Host passwords are unsupported: `load_config` strips any legacy `password` key, and `/api/status` only returns whitelisted host fields (`PUBLIC_HOST_FIELDS`). Never add credentials to API responses.
+- Escaping: values interpolated into inline JS handlers must go through Jinja `|tojson|forceescape` (template) or `jsArg()` (JS); HTML text/attributes use autoescape or `escAttr()`.
 
 ## Validation Checklist for Code Changes
 

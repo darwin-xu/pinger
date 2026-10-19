@@ -404,7 +404,7 @@
 {% set p = r.get('ping', {}) %}
 {% set t = r.get('tcp', {}) %}
 {% set ip = r.get('iperf3', {}) %}
-<tr class="data-row" id="row-{{ loop.index0 }}" onclick="selectHost('{{ name }}', {{ loop.index0 }})">
+<tr class="data-row" id="row-{{ loop.index0 }}" onclick="selectHost({{ name|tojson|forceescape }}, {{ loop.index0 }})">
     <td class="val-dim mobile-index">{{ loop.index }}</td>
     <td class="compare-col" onclick="event.stopPropagation()"><input type="checkbox" class="compare-cb" value="{{ name }}" checked onchange="_triggerCompare()"></td>
     <td class="mobile-title"><strong>{{ name }}</strong></td>
@@ -427,7 +427,7 @@
         <button class="btn-sm btn-run" id="run-{{ loop.index0 }}" onclick="triggerIperf3({{ loop.index0 }})" title="Run bandwidth test now">⚡</button>
         <button class="btn-sm btn-edit" onclick="toggleEdit({{ loop.index0 }})">✎</button>
         <form method="POST" action="/hosts/{{ loop.index0 }}/delete" style="display:inline"
-                    onsubmit="return confirm('Delete {{ name }}?')">
+                    onsubmit="return confirm({{ ('Delete ' ~ name ~ '?')|tojson|forceescape }})">
             <button class="btn-sm btn-delete" type="submit">✕</button>
         </form>
     </td>
@@ -446,8 +446,6 @@
             <input name="ssh_user" value="{{ h.ssh_user }}"></div>
         <div class="form-group"><label>SSH Port</label>
             <input name="ssh_port" type="number" value="{{ h.get('ssh_port', 22) }}"></div>
-        <div class="form-group"><label>Password</label>
-            <input name="password" type="password" autocomplete="new-password" value="{{ h.get('password', '') }}" placeholder="leave blank for key/agent"></div>
         <button type="submit" class="btn btn-primary">Save</button>
         <button type="button" class="btn btn-secondary" onclick="toggleEdit({{ loop.index0 }})">Cancel</button>
     </form>
@@ -511,8 +509,6 @@
                     <input name="ssh_user" value="root"></div>
                 <div class="form-group"><label>SSH Port</label>
                     <input name="ssh_port" type="number" value="22"></div>
-                <div class="form-group"><label>Password (optional)</label>
-                    <input name="password" type="password" autocomplete="new-password" placeholder="leave blank for key/agent"></div>
             </div>
             <br>
             <button type="submit" class="btn btn-primary">Add Host</button>
@@ -604,7 +600,12 @@ let _historyFetchAC  = null;   // AbortController for fetchAndRender
 let _compareFetchAC  = null;   // AbortController for fetchAndRenderCompare
 
 function escAttr(s) {
-    return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// JS string literal safe to embed inside a double-quoted HTML attribute (inline handlers)
+function jsArg(s) {
+    return escAttr(JSON.stringify(String(s)));
 }
 
 // Round a timestamp DOWN to the nearest tick boundary (local time)
@@ -1539,10 +1540,9 @@ function refreshDashboard() {
                 const dlErr   = (ip.success && ip.download_error) ? ip.download_error : null;
                 const ulErr   = (ip.success && ip.upload_error) ? ip.upload_error : null;
 
-                const safeName = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
                 const sel = (_selectedHost === name) ? ' selected' : '';
 
-                html += '<tr class="data-row' + sel + '" id="row-' + i + '" onclick="selectHost(\'' + safeName + '\',' + i + ')">';
+                html += '<tr class="data-row' + sel + '" id="row-' + i + '" onclick="selectHost(' + jsArg(name) + ',' + i + ')">';
                 const cmpColor = COMPARE_COLORS[Math.min(i, COMPARE_COLORS.length - 1)];
                 const cmpDisabled = i >= COMPARE_COLORS.length ? ' disabled' : '';
                 const cmpIsChecked = cmpChecked[name] !== false;
@@ -1552,10 +1552,10 @@ function refreshDashboard() {
                 html += '<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:' + cmpColor + ';flex-shrink:0"></span>';
                 html += '<input type="checkbox" class="compare-cb" value="' + escAttr(name) + '"' + (cmpIsChecked ? ' checked' : '') + cmpDisabled + ' onchange="_triggerCompare()">';
                 html += '</label></td>';
-                html += '<td class="mobile-title"><strong>' + name + '</strong></td>';
+                html += '<td class="mobile-title"><strong>' + escAttr(name) + '</strong></td>';
                 const providerUrl = h.provider ? (h.provider.startsWith('http') ? h.provider : 'https://' + h.provider) : null;
                 html += '<td class="mobile-provider" data-label="Provider">' + (providerUrl ? '<a href="' + escAttr(providerUrl) + '" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none;font-size:0.85rem" onclick="event.stopPropagation()">' + escAttr(h.provider) + '</a>' : '<span class="val-dim">\u2014</span>') + '</td>';
-                html += '<td class="host-col" data-label="Host">' + h.host + '</td>';
+                html += '<td class="host-col" data-label="Host">' + escAttr(h.host) + '</td>';
                 html += '<td class="icon mobile-status">' + icon + '</td>';
                 const FAIL = '<span class="val-red">✗</span>';
                 html += '<td data-label="Ping" class="' + cls(avg, pw, pc) + '">'           + (p.success === false ? FAIL : fmt(avg, ' ms'))   + '</td>';
@@ -1569,17 +1569,16 @@ function refreshDashboard() {
                 html += '<td class="mobile-actions" onclick="event.stopPropagation()">';
                 html += '<button class="btn-sm btn-run" id="run-'+i+'" onclick="triggerIperf3('+i+')" title="Run bandwidth test now">⚡</button> ';
                 html += '<button class="btn-sm btn-edit" onclick="toggleEdit('+i+')">✎</button> ';
-                html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(\'Delete '+safeName+'?\')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
+                html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(' + jsArg('Delete ' + name + '?') + ')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
                 html += '</td></tr>';
 
                 html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="13">';
                 html += '<form method="POST" action="/hosts/'+i+'/edit" class="edit-form">';
-                html += '<div class="form-group"><label>Name</label><input name="name" value="'+h.name+'" required></div>';
+                html += '<div class="form-group"><label>Name</label><input name="name" value="'+escAttr(h.name)+'" required></div>';
                 html += '<div class="form-group"><label>Provider</label><input name="provider" value="'+escAttr(h.provider||'')+'" placeholder="cloud.google.com"></div>';
-                html += '<div class="form-group"><label>Host</label><input name="host" value="'+h.host+'" required></div>';
-                html += '<div class="form-group"><label>SSH User</label><input name="ssh_user" value="'+(h.ssh_user||'')+'"></div>';
-                html += '<div class="form-group"><label>SSH Port</label><input name="ssh_port" type="number" value="'+(h.ssh_port||22)+'"></div>';
-                html += '<div class="form-group"><label>Password</label><input name="password" type="password" autocomplete="new-password" value="" placeholder="leave blank for key/agent"></div>';
+                html += '<div class="form-group"><label>Host</label><input name="host" value="'+escAttr(h.host)+'" required></div>';
+                html += '<div class="form-group"><label>SSH User</label><input name="ssh_user" value="'+escAttr(h.ssh_user||'')+'"></div>';
+                html += '<div class="form-group"><label>SSH Port</label><input name="ssh_port" type="number" value="'+escAttr(h.ssh_port||22)+'"></div>';
                 html += '<button type="submit" class="btn btn-primary">Save</button>';
                 html += '<button type="button" class="btn btn-secondary" onclick="toggleEdit('+i+')">Cancel</button>';
                 html += '</form></td></tr>';
