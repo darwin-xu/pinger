@@ -37,6 +37,9 @@ This file helps AI coding agents work effectively in this repository.
 ## Pitfalls and Guardrails
 
 - Thread safety: use ProbeEngine.snapshot() for reads rather than accessing live mutable state.
+- Storage: reads go through the read-only connection pool (`storage._read()`), never the writer lock; only writes take `storage._lock`. Don't hold `ProbeEngine._lock` while doing DB I/O.
+- History API: wide windows must be served from hourly rollups (`storage.rolled_series`), not raw rows. Don't reintroduce unbounded raw reads or per-poll full-history refetches in the UI.
+- Retention: raw ping/tcp rows are pruned only after they are rolled up (`retention_days`, default 90).
 - Host identity: persistence is keyed by host IP in storage; UI displays host name.
 - iperf3 behavior: server is started on demand and stopped after each run.
 - Auth is SSH key/agent only. Host passwords are unsupported: `load_config` strips any legacy `password` key, and `/api/status` only returns whitelisted host fields (`PUBLIC_HOST_FIELDS`). Never add credentials to API responses.

@@ -3,6 +3,9 @@ iperf3_interval: 60
 ping_count: 10
 iperf3_duration: 5
 iperf3_port: 5201
+# Days of raw ping/TCP rows to keep. Hourly rollups are always kept, so wide
+# charts still work after pruning. 0 keeps every raw row.
+retention_days: 90
 thresholds:
   ping_warn_ms: 100
   ping_crit_ms: 300

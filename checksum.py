@@ -63,15 +63,22 @@ def list_included_files(root: str | os.PathLike | None = None) -> List[Path]:
     if root is None:
         root = os.path.dirname(os.path.abspath(__file__))
     p = Path(root)
-    files = [
-        f
-        for f in p.rglob("*")
-        if (
-            f.is_file()
-            and _matches_any_pattern(f, INCLUDE_FILE_PATTERNS, p)
-            and not _matches_any_pattern(f, EXCLUDE_PATTERNS, p)
-        )
-    ]
+    files = []
+    for dirpath, dirnames, filenames in os.walk(p):
+        # Prune excluded directories (venv, .git, ...) instead of walking and
+        # then filtering every file inside them; the result is identical.
+        dirnames[:] = [
+            d for d in dirnames
+            if not any(fnmatch.fnmatch(d, pat) for pat in EXCLUDE_PATTERNS)
+        ]
+        for name in filenames:
+            f = Path(dirpath) / name
+            if (
+                f.is_file()
+                and _matches_any_pattern(f, INCLUDE_FILE_PATTERNS, p)
+                and not _matches_any_pattern(f, EXCLUDE_PATTERNS, p)
+            ):
+                files.append(f)
     # Sort by normalized POSIX relative path so ordering is consistent across
     # platforms (path separators and Unicode normalization).
     files.sort(key=lambda x: unicodedata.normalize("NFC", x.relative_to(p).as_posix()))

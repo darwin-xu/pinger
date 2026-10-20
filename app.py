@@ -16,7 +16,8 @@ from __future__ import annotations
 import argparse
 import os
 import threading
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 try:
     from checksum import compute_repo_checksum
 except ImportError:
@@ -24,7 +25,7 @@ except ImportError:
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 
-from engine import ProbeEngine, load_config, save_config
+from engine import ProbeEngine, load_config, retention_days, save_config
 import storage
 from formatting import fmt_duration
 
@@ -38,6 +39,13 @@ server_start: str | None = None
 
 PUBLIC_HOST_FIELDS = ("name", "host", "ssh_user", "ssh_port", "provider")
 
+CHECKSUM_TTL_S = 300
+_checksum_cache: tuple[float, str | None] | None = None
+_checksum_lock = threading.Lock()
+
+RAW_MAX_SPAN = timedelta(hours=24)  # longer windows are served from hourly rollups
+ROLLUP_MAX_POINTS = 150
+
 
 def _cfg() -> dict:
     assert engine is not None
@@ -50,6 +58,45 @@ def _public_hosts(hosts: list[dict]) -> list[dict]:
         {k: h[k] for k in PUBLIC_HOST_FIELDS if k in h}
         for h in hosts
     ]
+
+
+def _current_checksum() -> str | None:
+    """Repo checksum, recomputed at most once per CHECKSUM_TTL_S.
+
+    Hashing every deployable file on each poll (per open tab) is wasteful.
+    A deploy restarts the app, so a short-lived cache still flags new code.
+    """
+    global _checksum_cache
+    if compute_repo_checksum is None:
+        return os.environ.get("PINGER_CHECKSUM")
+    with _checksum_lock:
+        cached = _checksum_cache
+        if cached and time.monotonic() - cached[0] < CHECKSUM_TTL_S:
+            return cached[1]
+        try:
+            value = compute_repo_checksum()
+        except Exception:
+            value = os.environ.get("PINGER_CHECKSUM")
+        _checksum_cache = (time.monotonic(), value)
+        return value
+
+
+def _wants_rollup(since: str | None, until: str | None, retention: int) -> bool:
+    """True when a history window should be served from hourly rollups.
+
+    That is the case for windows longer than RAW_MAX_SPAN, and for any window
+    reaching back past the raw-retention cutoff (raw rows are pruned there).
+    """
+    if not since or not until:
+        return False
+    try:
+        since_dt = datetime.fromisoformat(since)
+        until_dt = datetime.fromisoformat(until)
+    except ValueError:
+        return False
+    if until_dt - since_dt > RAW_MAX_SPAN:
+        return True
+    return retention > 0 and since_dt < datetime.utcnow() - timedelta(days=retention)
 
 
 def _merge_recent(*series: list[dict], limit: int) -> list[dict]:
@@ -174,12 +221,7 @@ def trigger_iperf3(idx: int):
 
 @app.route("/api/version")
 def api_version():
-    # Return checksum (from repository files) and server start time.
-    try:
-        checksum = compute_repo_checksum() if compute_repo_checksum else os.environ.get("PINGER_CHECKSUM")
-    except Exception:
-        checksum = os.environ.get("PINGER_CHECKSUM")
-    return jsonify({"checksum": checksum, "server_start": server_start})
+    return jsonify({"checksum": _current_checksum(), "server_start": server_start})
 
 
 # ── History API ───────────────────────────────────────────────────
@@ -194,15 +236,29 @@ def api_history(host: str):
     limit = min(request.args.get("limit", 1000, type=int), 50000)
     since = request.args.get("since") or None
     until = request.args.get("until") or None
+    rollup = _wants_rollup(since, until, retention_days(cfg))
     iperf3_by_ip = storage.recent(host_ip, "iperf3", limit=limit, since=since, until=until)
     iperf3_by_name = (
         storage.recent(host_name, "iperf3", limit=limit, since=since, until=until)
         if host_name != host_ip else []
     )
+    iperf3 = _merge_recent(iperf3_by_ip, iperf3_by_name, limit=limit)
+    if rollup:
+        # Wide window: hourly rollups, so the payload and query cost no longer
+        # grow with the window or the age of the database.
+        ping, _ = storage.rolled_series(host_ip, "ping", since, until, ROLLUP_MAX_POINTS)
+        tcp, tcp_failed = storage.rolled_series(host_ip, "tcp", since, until, ROLLUP_MAX_POINTS)
+        iperf3 = storage.downsample_rows(iperf3, since, until, ROLLUP_MAX_POINTS)
+    else:
+        ping = storage.recent(host_ip, "ping", limit=limit, since=since, until=until)
+        tcp = storage.recent(host_ip, "tcp", limit=limit, since=since, until=until)
+        tcp_failed = [{"ts": r["ts"], "count": 1} for r in tcp if r.get("success") is False]
     return jsonify(
-        ping=storage.recent(host_ip, "ping", limit=limit, since=since, until=until),
-        tcp=storage.recent(host_ip, "tcp",  limit=limit, since=since, until=until),
-        iperf3=_merge_recent(iperf3_by_ip, iperf3_by_name, limit=limit),
+        ping=ping,
+        tcp=tcp,
+        iperf3=iperf3,
+        tcp_failed=tcp_failed,
+        resolution="rollup" if rollup else "raw",
     )
 
 
@@ -249,6 +305,7 @@ def main() -> None:
     engine.start()
     # Record server start time for version API (UTC ISO format)
     server_start = datetime.utcnow().isoformat() + 'Z'
+    _current_checksum()  # warm the cache so the first poll is instant
 
     print(f"Dashboard: http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=False)

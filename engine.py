@@ -17,6 +17,18 @@ from probes import tcp as tcp_probe
 
 CONFIG_PATH = "config.yaml"
 
+DEFAULT_RETENTION_DAYS = 90
+MAINTENANCE_INTERVAL_S = 600
+
+
+def retention_days(cfg: dict) -> int:
+    """Days of raw ping/tcp rows to keep; 0 keeps everything."""
+    value = cfg.get("retention_days", DEFAULT_RETENTION_DAYS)
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return DEFAULT_RETENTION_DAYS
+
 
 def interval_minutes(value: object, default: int = 60) -> int:
     """Parse the periodic iperf3 interval as whole minutes."""
@@ -83,19 +95,27 @@ class ProbeEngine:
 
     def _init_hosts(self) -> None:
         hosts = self.cfg.get("hosts", [])
+        # Read the DB before taking the lock so snapshot() is never blocked on I/O.
+        loaded = []
+        for h in hosts:
+            probes = {}
+            # Keyed by IP so renames don't lose history
+            for probe_name in ("ping", "tcp", "iperf3"):
+                row = storage.latest(h["host"], probe_name)
+                if row:
+                    probes[probe_name] = row
+            pings = [
+                row["avg"]
+                for row in reversed(storage.recent(h["host"], "ping", limit=20))
+                if row.get("success") and row.get("avg") is not None
+            ]
+            loaded.append((h["name"], probes, pings))
         with self._lock:
-            for h in hosts:
-                name = h["name"]
+            for name, probes, pings in loaded:
                 if name not in self.history:
                     self.history[name] = deque(maxlen=20)
-                # Pre-load from DB (keyed by IP so renames don't lose history)
-                for probe_name in ("ping", "tcp", "iperf3"):
-                    row = storage.latest(h["host"], probe_name)
-                    if row:
-                        self.results[name][probe_name] = row
-                for row in reversed(storage.recent(h["host"], "ping", limit=20)):
-                    if row.get("success") and row.get("avg") is not None:
-                        self.history[name].append(row["avg"])
+                self.results[name].update(probes)
+                self.history[name].extend(pings)
 
     def reload_config(self, cfg: dict) -> None:
         """Hot-reload the config (e.g. after a web UI edit)."""
@@ -225,6 +245,32 @@ class ProbeEngine:
                 self._config_changed.clear()
         self._set_iperf3_state(thread_alive=False)
 
+    def run_maintenance(self) -> None:
+        """Roll closed hours into the rollup table, then prune old raw rows."""
+        ips = list(dict.fromkeys(h["host"] for h in self.cfg.get("hosts", [])))
+        for ip in ips:
+            for probe in storage.ROLLUP_PROBES:
+                if self._stop.is_set():
+                    return
+                storage.rollup_hours(ip, probe)
+        days = retention_days(self.cfg)
+        if days <= 0:
+            return
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        for ip in ips:
+            for probe in storage.ROLLUP_PROBES:
+                if self._stop.is_set():
+                    return
+                storage.prune_raw(ip, probe, cutoff)
+
+    def _maintenance_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.run_maintenance()
+            except Exception as exc:
+                print(f"[maintenance error] {exc}", file=sys.stderr)
+            self._stop.wait(timeout=MAINTENANCE_INTERVAL_S)
+
     # ── Start / stop ──────────────────────────────────────────────────────
 
     def start(self) -> None:
@@ -234,9 +280,11 @@ class ProbeEngine:
         self._config_changed.clear()
         t1 = threading.Thread(target=self._ping_loop, daemon=True, name="ping-loop")
         t2 = threading.Thread(target=self._iperf3_loop, daemon=True, name="iperf3-loop")
+        t3 = threading.Thread(target=self._maintenance_loop, daemon=True, name="maintenance-loop")
         t1.start()
         t2.start()
-        self._threads = [t1, t2]
+        t3.start()
+        self._threads = [t1, t2, t3]
         self._running = True
 
     def stop(self) -> None:

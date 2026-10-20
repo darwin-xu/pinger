@@ -28,6 +28,8 @@ A tool that periodically probes multiple VPS servers with three complementary me
 │             ├── SSH → start iperf3 -s briefly               │
 │             ├── iperf3 client: upload + download test       │
 │             └── SSH → kill iperf3 -s (port closed again)    │
+│       └── Maintenance  (every 10 min)                       │
+│             └── hourly rollups + raw-row retention pruning  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -187,6 +189,7 @@ iperf3_interval:  60    # integer minutes between iperf3 cycles; 0 disables peri
 ping_count:       10    # ICMP packets per probe run
 iperf3_duration:  5     # seconds per iperf3 direction
 iperf3_port:      5201  # port used during iperf3 tests
+retention_days:   90    # days of raw ping/TCP rows to keep (hourly rollups are kept); 0 keeps everything
 
 thresholds:
   ping_warn_ms:   100
@@ -211,6 +214,7 @@ hosts:
 - Increase `probe_interval` (e.g. `60`) to reduce noise and network traffic.
 - Increase `iperf3_interval` to reduce bandwidth-test traffic, or set it to `0` to disable periodic iperf3 tests globally. Any positive interval tests every configured host sequentially, one server at a time.
 - `/api/status` includes `scheduler.iperf3` with the scheduled hosts, last cycle timestamps, next due time, and last scheduler error for diagnosing periodic bandwidth tests.
+- Lower `retention_days` to keep `pinger.db` small on long-running installs; raise it (or set `0`) if you want per-sample detail for longer.
 - Lower `bw_warn_mbps` / `bw_crit_mbps` for servers with limited bandwidth.
 - The TCP probe connects to `ssh_port`, doubling as an SSH availability check.
 
@@ -232,7 +236,9 @@ chmod +x deploy_iperf3.sh
 Results are stored in `pinger.db` (SQLite, created automatically):
 
 ```sql
-metrics(id, ts TEXT, host TEXT, probe TEXT, data TEXT)
+metrics(id, ts TEXT, host TEXT, probe TEXT, data TEXT)   -- raw samples
+rollup(host, probe, bucket, n, nfail, first_ts, last_ts, sums, fails)   -- one row per closed hour (ping/tcp)
+rollup_meta(host, probe, upto)                            -- how far each host/probe is rolled up
 ```
 
 Query history directly:
@@ -240,6 +246,17 @@ Query history directly:
 ```bash
 sqlite3 pinger.db "SELECT ts, data FROM metrics WHERE host='Tokyo-1' AND probe='ping' ORDER BY ts DESC LIMIT 10;"
 ```
+
+### Rollups and retention
+
+A background maintenance thread (every 10 minutes, and once at startup) rolls each closed hour of ping/TCP samples into the `rollup` table (sample count, per-field sums, failure timestamps). A one-time backfill of an existing database runs in the background and can take a few seconds per million rows; the dashboard keeps working meanwhile.
+
+- `/api/history/<host>` serves windows of up to 24 h from raw rows. Longer windows, or windows reaching back past the retention cutoff, are served from the hourly rollups plus the not-yet-rolled-up tail, downsampled to at most 150 points. Response time and size therefore do not grow with the window or the age of the database. The response includes `resolution` (`raw` or `rollup`) and `tcp_failed` (`[{ts, count}]` failure markers).
+- Raw ping/TCP rows older than `retention_days` (default `90`) are deleted, but only after they have been rolled up, so wide charts keep their hourly history. Set `retention_days: 0` to keep every raw row. iperf3 rows are never pruned (they are infrequent).
+- Pruning removes per-sample detail (min/max/p95) for data older than the cutoff; hourly means, loss, failure counts and failure timestamps are kept.
+- Rollups are computed for hosts currently in `config.yaml`; rows of removed hosts are left untouched.
+
+The dashboard only refetches the history chart in live mode when a new probe result has arrived (and at most about once per pixel of the visible window, capped at 5 minutes), and polling pauses while the browser tab is hidden.
 
 The history charts use `probe_interval` to identify missing probe windows. When adjacent samples are separated by more than two probe intervals, the connecting segment is drawn thinner and lighter so downtime or dashboard gaps are not mistaken for normal measurements. Y-axes are anchored at zero so charts show the full range from 0 to the observed maximum instead of zooming into only the observed min/max band. For compatibility with older databases, iperf3 history is read by both the current host IP key and the display-name key. The TCP RTT failures legend shows the number of failed TCP probes in the current chart window and toggles the failure markers.
 On the 12h chart scale, x-axis labels include the date. On the 1mo scale, chart ticks align to the 1st of each month and the live range ends at the current time instead of a future month boundary.

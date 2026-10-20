@@ -578,8 +578,7 @@ let _zoomIdx   = 1;      // default: 1 h
 let _windowEnd = null;   // null = live (right edge = now)
 let _selectedHost = null;
 let _selectedIdx  = null;
-let _tcpFailed = [];          // raw failed TCP rows for current latency window
-let _tcpFailedThreshold = 20_000; // ms tolerance for tooltip match
+let _tcpFailed = [];          // failed TCP probes ({ts, count}) in the current latency window
 let _tcpFailuresWanted = true;
 const _hiddenState = {};  // metricId -> true (hidden) | false (visible); persists across host switches
 let _chartMode = 'dedicated';     // 'dedicated' | 'compare'
@@ -655,11 +654,39 @@ function monthWindowForEnd(endMs) {
 
 // (clock removed)
 
+// ── Polling ───────────────────────────────────────────────────────────────────
+// Chained timeouts: the next poll is scheduled only after the previous one
+// finishes, so a slow server never accumulates overlapping requests.  Polling
+// pauses while the tab is hidden and runs once immediately when it returns.
+const _pollers = [];
+function createPoller(fn, intervalMs) {
+    let timer = null;
+    function schedule() {
+        if (timer === null && !document.hidden) timer = setTimeout(tick, intervalMs);
+    }
+    async function tick() {
+        timer = null;
+        if (document.hidden) return;
+        try { await fn(); } catch (e) { /* next tick retries */ }
+        schedule();
+    }
+    const poller = {
+        start: schedule,
+        stop() { if (timer !== null) { clearTimeout(timer); timer = null; } },
+        runNow() { poller.stop(); tick(); },
+    };
+    _pollers.push(poller);
+    return poller;
+}
+document.addEventListener('visibilitychange', () => {
+    _pollers.forEach(p => document.hidden ? p.stop() : p.runNow());
+});
+
 // ── Version check ─────────────────────────────────────────────────────────────
 // Version check: prefer checksum and show server start time
 let _currentChecksum = null;
 function checkVersion() {
-    fetch('/api/version')
+    return fetch('/api/version')
         .then(r => r.json())
         .then(d => {
             const c = d.checksum || null;
@@ -694,7 +721,8 @@ function checkVersion() {
         .catch(() => {});
 }
 checkVersion();
-setInterval(checkVersion, 30_000);
+const versionPoller = createPoller(checkVersion, 30_000);
+versionPoller.start();
 
 // ── Inline edit toggle ────────────────────────────────────────────────────────
 function toggleEdit(idx) {
@@ -1335,15 +1363,13 @@ function renderChart(name, tab, data, winStart, winEnd) {
                                 yellow: '#d29922', red: '#f85149', cyan: '#58a6ff' };
     const zl = ZOOM_LEVELS[_zoomIdx];
 
-    // Aggregate when density > 150 points (≈ zoomed out beyond 12–13 min at 5 s interval)
-    const aggregated = data.ping.length > 150;
-
     function prepRows(raw) {
         const asc = [...raw].reverse().filter(r => {
             const t = new Date(_ts(r)).getTime();
             return t >= winStart && t <= winEnd;
         });
-        return aggregated ? aggregateSeries(asc, winStart, winEnd, 100) : asc;
+        // The server already downsamples wide windows; only thin out dense raw series.
+        return asc.length > 150 ? aggregateSeries(asc, winStart, winEnd, 100) : asc;
     }
 
     let datasets = [], yScales = {};
@@ -1351,24 +1377,24 @@ function renderChart(name, tab, data, winStart, winEnd) {
     if (tab === 'latency') {
         const ping = prepRows(data.ping);
         const tcp  = prepRows(data.tcp);
-        // Raw failed TCP probes within the window — used for failure markers and tooltip
-        const tcpFailed = [...data.tcp].reverse().filter(r => {
-            const t = new Date(_ts(r)).getTime();
-            return t >= winStart && t <= winEnd && r.success === false;
+        // Failed TCP probes within the window ({ts, count}) for failure markers and the legend
+        const tcpFailed = (data.tcp_failed || []).filter(f => {
+            const t = new Date(_ts(f)).getTime();
+            return t >= winStart && t <= winEnd;
         });
+        const tcpFailedCount = tcpFailed.reduce((n, f) => n + (f.count || 1), 0);
         _tcpFailed = tcpFailed;
-        _tcpFailedThreshold = aggregated ? (winEnd - winStart) / 200 : 20_000;
         const pingAvg   = computeAvg(data.ping, 'avg');
         const jitterAvg = computeAvg(data.ping, 'jitter');
         const tcpRttAvg = computeAvg(data.tcp,  'rtt');
         const lossAvg   = computeAvg(data.ping, 'loss');
         const fmtLbl = (name, v) => v != null ? name + ': ' + fmtDur(v) : name;
-        const lossRows = prepRows(data.ping);
+        const lossRows = ping;
         datasets = [
             lineDataset({ metricId: 'ping-avg', label: fmtLbl('Ping avg', pingAvg),   data: pointsWithGaps(ping, r => r.success ? r.avg    : null), borderColor: CH.green,  backgroundColor: 'rgba(63,185,80,0.08)' }),
             lineDataset({ metricId: 'jitter',   label: fmtLbl('Jitter avg', jitterAvg), data: pointsWithGaps(ping, r => r.success ? r.jitter : null), borderColor: CH.yellow, backgroundColor: 'rgba(210,153,34,0.08)' }),
             lineDataset({ metricId: 'tcp-rtt',  label: fmtLbl('TCP RTT avg', tcpRttAvg), data: pointsWithGaps(tcp,  r => r.success ? r.rtt    : null), borderColor: CH.cyan,   backgroundColor: 'rgba(88,166,255,0.08)' }),
-            failureLegendDataset(tcpFailed.length, winStart),
+            failureLegendDataset(tcpFailedCount, winStart),
             lineDataset({ metricId: 'loss', label: lossAvg != null ? 'Loss avg: ' + fmtNum(lossAvg) + '%' : 'Loss (%)', data: pointsWithGaps(lossRows, r => r.loss ?? null), borderColor: CH.red, backgroundColor: 'rgba(248,81,73,0.15)', fill: true, yAxisID: 'yLoss' }),
         ];
         yScales = {
@@ -1485,111 +1511,38 @@ function renderChart(name, tab, data, winStart, winEnd) {
 }
 
 // ── Auto-refresh dashboard every 5 s ─────────────────────────────────────────
+let _lastTableSig = null;   // skip the table rebuild when /api/status is unchanged
+let _lastDataSig  = null;   // newest probe timestamps seen when the chart was last refreshed
+let _lastLiveFetch = 0;
+
+// Live charts only need refetching when a new probe result exists, and no more
+// often than about once per pixel of the visible window (capped at 5 min).
+function _liveChartRefreshDue(data) {
+    const sig = data.hosts.map(h => {
+        const r = data.results[h.name] || {};
+        return ((r.ping || {}).ts || '') + '|' + ((r.iperf3 || {}).ts || '');
+    }).join(',');
+    const minMs = Math.min(Math.max(PROBE_INTERVAL_MS, ZOOM_LEVELS[_zoomIdx].windowMs / 600), 300_000);
+    if (sig === _lastDataSig || Date.now() - _lastLiveFetch < minMs) return false;
+    _lastDataSig = sig;
+    _lastLiveFetch = Date.now();
+    return true;
+}
+
 function refreshDashboard() {
     const tbody = document.getElementById('host-rows');
-    if (tbody.contains(document.activeElement)) return;
+    if (tbody.contains(document.activeElement)) return Promise.resolve();
 
-    fetch('/api/status')
+    return fetch('/api/status')
         .then(r => r.json())
         .then(data => {
-            const thr = data.thresholds || {};
-            const savedEditRows = new Map();
-            tbody.querySelectorAll('.edit-row.active').forEach(el => savedEditRows.set(el.id, el.cloneNode(true)));
-            const cmpChecked = {};
-            tbody.querySelectorAll('.compare-cb').forEach(cb => { cmpChecked[cb.value] = cb.checked; });
-            let html = '';
-            data.hosts.forEach((h, i) => {
-                const name = h.name;
-                const r  = data.results[name] || {};
-                const p  = r.ping   || {};
-                const t  = r.tcp    || {};
-                const ip = r.iperf3 || {};
-
-                const pw = thr.ping_warn_ms || 100, pc = thr.ping_crit_ms || 300;
-                const lw = thr.loss_warn_pct || 1,  lc = thr.loss_crit_pct || 5;
-                const tw = thr.tcp_warn_ms  || 150, tc = thr.tcp_crit_ms   || 500;
-                const bw = thr.bw_warn_mbps || 50,  bc = thr.bw_crit_mbps  || 10;
-
-                function cls(v, w, c, low) {
-                    if (v == null) return 'val-dim';
-                    if (low) return v <= c ? 'val-red' : v <= w ? 'val-yellow' : 'val-green';
-                    return v >= c ? 'val-red' : v >= w ? 'val-yellow' : 'val-green';
-                }
-                function fmt(v, suf, dec) {
-                    if (v == null) return '—';
-                    if (suf === ' ms' || suf === 'ms') return fmtDur(v);
-                    const r = Math.round(v * 100) / 100;
-                    return r.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: dec !== undefined ? dec : 2 }) + (suf || '');
-                }
-
-                let icon = '?';
-                if (p.success === false || (p.loss != null && p.loss >= 50))
-                    icon = '<span class="val-red">✗</span>';
-                else if (p.success)
-                    icon = (p.loss >= 1 || t.success === false)
-                        ? '<span class="val-yellow">⚠</span>'
-                        : '<span class="val-green">✓</span>';
-
-                const avg    = p.success     ? p.avg          : null;
-                const jitter = p.success     ? p.jitter        : null;
-                const loss   = p.loss != null ? p.loss         : null;
-                const rtt    = t.success     ? t.rtt           : null;
-                const dl      = ip.success ? ip.download_mbps : null;
-                const ul      = ip.success ? ip.upload_mbps   : null;
-                const ipErr   = (ip.success === false && ip.error) ? ip.error : null;
-                const dlErr   = (ip.success && ip.download_error) ? ip.download_error : null;
-                const ulErr   = (ip.success && ip.upload_error) ? ip.upload_error : null;
-
-                const sel = (_selectedHost === name) ? ' selected' : '';
-
-                html += '<tr class="data-row' + sel + '" id="row-' + i + '" onclick="selectHost(' + jsArg(name) + ',' + i + ')">';
-                const cmpColor = COMPARE_COLORS[Math.min(i, COMPARE_COLORS.length - 1)];
-                const cmpDisabled = i >= COMPARE_COLORS.length ? ' disabled' : '';
-                const cmpIsChecked = cmpChecked[name] !== false;
-                html += '<td class="val-dim mobile-index">' + (i+1) + '</td>';
-                html += '<td class="compare-col" onclick="event.stopPropagation()">';
-                html += '<label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer">';
-                html += '<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:' + cmpColor + ';flex-shrink:0"></span>';
-                html += '<input type="checkbox" class="compare-cb" value="' + escAttr(name) + '"' + (cmpIsChecked ? ' checked' : '') + cmpDisabled + ' onchange="_triggerCompare()">';
-                html += '</label></td>';
-                html += '<td class="mobile-title"><strong>' + escAttr(name) + '</strong></td>';
-                const providerUrl = h.provider ? (h.provider.startsWith('http') ? h.provider : 'https://' + h.provider) : null;
-                html += '<td class="mobile-provider" data-label="Provider">' + (providerUrl ? '<a href="' + escAttr(providerUrl) + '" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none;font-size:0.85rem" onclick="event.stopPropagation()">' + escAttr(h.provider) + '</a>' : '<span class="val-dim">\u2014</span>') + '</td>';
-                html += '<td class="host-col" data-label="Host">' + escAttr(h.host) + '</td>';
-                html += '<td class="icon mobile-status">' + icon + '</td>';
-                const FAIL = '<span class="val-red">✗</span>';
-                html += '<td data-label="Ping" class="' + cls(avg, pw, pc) + '">'           + (p.success === false ? FAIL : fmt(avg, ' ms'))   + '</td>';
-                html += '<td data-label="Jitter" class="' + cls(jitter, pw*0.3, pc*0.3) + '">'+ (p.success === false ? FAIL : fmt(jitter,' ms')) + '</td>';
-                html += '<td data-label="Loss" class="' + cls(loss, lw, lc) + '">'          + fmt(loss, '%')                                    + '</td>';
-                html += '<td data-label="TCP" class="' + cls(rtt, tw, tc) + '">'           + (t.success === false ? FAIL : fmt(rtt, ' ms'))   + '</td>';
-                const dlCell = dl != null ? fmt(dl, '', 0) : dlErr ? '<span class="val-yellow err-tip" title="' + escAttr(dlErr) + '">—</span>' : ipErr ? '<span class="val-yellow err-tip" title="' + escAttr(ipErr) + '">⚠</span>' : '—';
-                const ulCell = ul != null ? fmt(ul, '', 0) : ulErr ? '<span class="val-yellow err-tip" title="' + escAttr(ulErr) + '">—</span>' : '—';
-                html += '<td data-label="↓ Mbps" class="' + cls(dl, bw, bc, true) + '">' + dlCell + '</td>';
-                html += '<td data-label="↑ Mbps" class="' + cls(ul, bw, bc, true) + '">' + ulCell + '</td>';
-                html += '<td class="mobile-actions" onclick="event.stopPropagation()">';
-                html += '<button class="btn-sm btn-run" id="run-'+i+'" onclick="triggerIperf3('+i+')" title="Run bandwidth test now">⚡</button> ';
-                html += '<button class="btn-sm btn-edit" onclick="toggleEdit('+i+')">✎</button> ';
-                html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(' + jsArg('Delete ' + name + '?') + ')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
-                html += '</td></tr>';
-
-                html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="13">';
-                html += '<form method="POST" action="/hosts/'+i+'/edit" class="edit-form">';
-                html += '<div class="form-group"><label>Name</label><input name="name" value="'+escAttr(h.name)+'" required></div>';
-                html += '<div class="form-group"><label>Provider</label><input name="provider" value="'+escAttr(h.provider||'')+'" placeholder="cloud.google.com"></div>';
-                html += '<div class="form-group"><label>Host</label><input name="host" value="'+escAttr(h.host)+'" required></div>';
-                html += '<div class="form-group"><label>SSH User</label><input name="ssh_user" value="'+escAttr(h.ssh_user||'')+'"></div>';
-                html += '<div class="form-group"><label>SSH Port</label><input name="ssh_port" type="number" value="'+escAttr(h.ssh_port||22)+'"></div>';
-                html += '<button type="submit" class="btn btn-primary">Save</button>';
-                html += '<button type="button" class="btn btn-secondary" onclick="toggleEdit('+i+')">Cancel</button>';
-                html += '</form></td></tr>';
-            });
-            tbody.innerHTML = html;
-            savedEditRows.forEach((savedEl, id) => {
-                const newEl = document.getElementById(id);
-                if (newEl) newEl.parentNode.replaceChild(savedEl, newEl);
-            });
+            const tableSig = JSON.stringify([data.hosts, data.results, data.thresholds, _selectedHost]);
+            if (tableSig !== _lastTableSig) {
+                _lastTableSig = tableSig;
+                renderHostRows(tbody, data);
+            }
             // Silently refresh history chart in live mode
-            if (_windowEnd === null) {
+            if (_windowEnd === null && _liveChartRefreshDue(data)) {
                 if (_chartMode === 'compare') {
                     _triggerCompare();
                 } else if (_selectedHost) {
@@ -1599,7 +1552,108 @@ function refreshDashboard() {
         })
         .catch(() => {});
 }
-setInterval(refreshDashboard, 5000);
+
+function renderHostRows(tbody, data) {
+    const thr = data.thresholds || {};
+    const savedEditRows = new Map();
+    tbody.querySelectorAll('.edit-row.active').forEach(el => savedEditRows.set(el.id, el.cloneNode(true)));
+    const cmpChecked = {};
+    tbody.querySelectorAll('.compare-cb').forEach(cb => { cmpChecked[cb.value] = cb.checked; });
+    let html = '';
+    data.hosts.forEach((h, i) => {
+        const name = h.name;
+        const r  = data.results[name] || {};
+        const p  = r.ping   || {};
+        const t  = r.tcp    || {};
+        const ip = r.iperf3 || {};
+
+        const pw = thr.ping_warn_ms || 100, pc = thr.ping_crit_ms || 300;
+        const lw = thr.loss_warn_pct || 1,  lc = thr.loss_crit_pct || 5;
+        const tw = thr.tcp_warn_ms  || 150, tc = thr.tcp_crit_ms   || 500;
+        const bw = thr.bw_warn_mbps || 50,  bc = thr.bw_crit_mbps  || 10;
+
+        function cls(v, w, c, low) {
+            if (v == null) return 'val-dim';
+            if (low) return v <= c ? 'val-red' : v <= w ? 'val-yellow' : 'val-green';
+            return v >= c ? 'val-red' : v >= w ? 'val-yellow' : 'val-green';
+        }
+        function fmt(v, suf, dec) {
+            if (v == null) return '—';
+            if (suf === ' ms' || suf === 'ms') return fmtDur(v);
+            const r = Math.round(v * 100) / 100;
+            return r.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: dec !== undefined ? dec : 2 }) + (suf || '');
+        }
+
+        let icon = '?';
+        if (p.success === false || (p.loss != null && p.loss >= 50))
+            icon = '<span class="val-red">✗</span>';
+        else if (p.success)
+            icon = (p.loss >= 1 || t.success === false)
+                ? '<span class="val-yellow">⚠</span>'
+                : '<span class="val-green">✓</span>';
+
+        const avg    = p.success     ? p.avg          : null;
+        const jitter = p.success     ? p.jitter        : null;
+        const loss   = p.loss != null ? p.loss         : null;
+        const rtt    = t.success     ? t.rtt           : null;
+        const dl      = ip.success ? ip.download_mbps : null;
+        const ul      = ip.success ? ip.upload_mbps   : null;
+        const ipErr   = (ip.success === false && ip.error) ? ip.error : null;
+        const dlErr   = (ip.success && ip.download_error) ? ip.download_error : null;
+        const ulErr   = (ip.success && ip.upload_error) ? ip.upload_error : null;
+
+        const sel = (_selectedHost === name) ? ' selected' : '';
+
+        html += '<tr class="data-row' + sel + '" id="row-' + i + '" onclick="selectHost(' + jsArg(name) + ',' + i + ')">';
+        const cmpColor = COMPARE_COLORS[Math.min(i, COMPARE_COLORS.length - 1)];
+        const cmpDisabled = i >= COMPARE_COLORS.length ? ' disabled' : '';
+        const cmpIsChecked = cmpChecked[name] !== false;
+        html += '<td class="val-dim mobile-index">' + (i+1) + '</td>';
+        html += '<td class="compare-col" onclick="event.stopPropagation()">';
+        html += '<label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer">';
+        html += '<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:' + cmpColor + ';flex-shrink:0"></span>';
+        html += '<input type="checkbox" class="compare-cb" value="' + escAttr(name) + '"' + (cmpIsChecked ? ' checked' : '') + cmpDisabled + ' onchange="_triggerCompare()">';
+        html += '</label></td>';
+        html += '<td class="mobile-title"><strong>' + escAttr(name) + '</strong></td>';
+        const providerUrl = h.provider ? (h.provider.startsWith('http') ? h.provider : 'https://' + h.provider) : null;
+        html += '<td class="mobile-provider" data-label="Provider">' + (providerUrl ? '<a href="' + escAttr(providerUrl) + '" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none;font-size:0.85rem" onclick="event.stopPropagation()">' + escAttr(h.provider) + '</a>' : '<span class="val-dim">\u2014</span>') + '</td>';
+        html += '<td class="host-col" data-label="Host">' + escAttr(h.host) + '</td>';
+        html += '<td class="icon mobile-status">' + icon + '</td>';
+        const FAIL = '<span class="val-red">✗</span>';
+        html += '<td data-label="Ping" class="' + cls(avg, pw, pc) + '">'           + (p.success === false ? FAIL : fmt(avg, ' ms'))   + '</td>';
+        html += '<td data-label="Jitter" class="' + cls(jitter, pw*0.3, pc*0.3) + '">'+ (p.success === false ? FAIL : fmt(jitter,' ms')) + '</td>';
+        html += '<td data-label="Loss" class="' + cls(loss, lw, lc) + '">'          + fmt(loss, '%')                                    + '</td>';
+        html += '<td data-label="TCP" class="' + cls(rtt, tw, tc) + '">'           + (t.success === false ? FAIL : fmt(rtt, ' ms'))   + '</td>';
+        const dlCell = dl != null ? fmt(dl, '', 0) : dlErr ? '<span class="val-yellow err-tip" title="' + escAttr(dlErr) + '">—</span>' : ipErr ? '<span class="val-yellow err-tip" title="' + escAttr(ipErr) + '">⚠</span>' : '—';
+        const ulCell = ul != null ? fmt(ul, '', 0) : ulErr ? '<span class="val-yellow err-tip" title="' + escAttr(ulErr) + '">—</span>' : '—';
+        html += '<td data-label="↓ Mbps" class="' + cls(dl, bw, bc, true) + '">' + dlCell + '</td>';
+        html += '<td data-label="↑ Mbps" class="' + cls(ul, bw, bc, true) + '">' + ulCell + '</td>';
+        html += '<td class="mobile-actions" onclick="event.stopPropagation()">';
+        html += '<button class="btn-sm btn-run" id="run-'+i+'" onclick="triggerIperf3('+i+')" title="Run bandwidth test now">⚡</button> ';
+        html += '<button class="btn-sm btn-edit" onclick="toggleEdit('+i+')">✎</button> ';
+        html += '<form method="POST" action="/hosts/'+i+'/delete" style="display:inline" onsubmit="return confirm(' + jsArg('Delete ' + name + '?') + ')"><button class="btn-sm btn-delete" type="submit">✕</button></form>';
+        html += '</td></tr>';
+
+        html += '<tr class="edit-row" id="edit-'+i+'"><td colspan="13">';
+        html += '<form method="POST" action="/hosts/'+i+'/edit" class="edit-form">';
+        html += '<div class="form-group"><label>Name</label><input name="name" value="'+escAttr(h.name)+'" required></div>';
+        html += '<div class="form-group"><label>Provider</label><input name="provider" value="'+escAttr(h.provider||'')+'" placeholder="cloud.google.com"></div>';
+        html += '<div class="form-group"><label>Host</label><input name="host" value="'+escAttr(h.host)+'" required></div>';
+        html += '<div class="form-group"><label>SSH User</label><input name="ssh_user" value="'+escAttr(h.ssh_user||'')+'"></div>';
+        html += '<div class="form-group"><label>SSH Port</label><input name="ssh_port" type="number" value="'+escAttr(h.ssh_port||22)+'"></div>';
+        html += '<button type="submit" class="btn btn-primary">Save</button>';
+        html += '<button type="button" class="btn btn-secondary" onclick="toggleEdit('+i+')">Cancel</button>';
+        html += '</form></td></tr>';
+    });
+    tbody.innerHTML = html;
+    savedEditRows.forEach((savedEl, id) => {
+        const newEl = document.getElementById(id);
+        if (newEl) newEl.parentNode.replaceChild(savedEl, newEl);
+    });
+}
+
+const dashboardPoller = createPoller(refreshDashboard, 5000);
+dashboardPoller.start();
 </script>
 
 </body>
