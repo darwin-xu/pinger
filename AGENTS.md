@@ -39,6 +39,8 @@ This file helps AI coding agents work effectively in this repository.
 - Thread safety: use ProbeEngine.snapshot() for reads rather than accessing live mutable state.
 - Storage: reads go through the read-only connection pool (`storage._read()`), never the writer lock; only writes take `storage._lock`. Don't hold `ProbeEngine._lock` while doing DB I/O.
 - History API: wide windows must be served from hourly rollups (`storage.rolled_series`), not raw rows. Don't reintroduce unbounded raw reads or per-poll full-history refetches in the UI.
+- Recent-sample cache: samples must go through `storage.save()` and `ProbeEngine._cache_sample()` together, so the RAM cache and the database agree. `ProbeEngine.cached_recent()` must return exactly what `storage.recent()` would, or `None` to fall back.
+- Frontend assets are self-hosted under `static/vendor/` (no CDN). New static `.js` files must match `INCLUDE_FILE_PATTERNS` in `checksum.py` or `deploy.sh` will not sync them. Chart.js is loaded before the inline page script and cannot be `defer`red.
 - Retention: raw ping/tcp rows are pruned only after they are rolled up (`retention_days`, default 90).
 - Host identity: persistence is keyed by host IP in storage; UI displays host name.
 - iperf3 behavior: server is started on demand and stopped after each run.

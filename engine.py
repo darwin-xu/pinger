@@ -1,6 +1,7 @@
 """Shared probe engine used by both main.py (CLI) and app.py (web)."""
 from __future__ import annotations
 
+import json
 import sys
 import threading
 import time
@@ -19,6 +20,8 @@ CONFIG_PATH = "config.yaml"
 
 DEFAULT_RETENTION_DAYS = 90
 MAINTENANCE_INTERVAL_S = 600
+RECENT_CACHE_HOURS = 24
+CACHED_PROBES = ("ping", "tcp", "iperf3")
 
 
 def retention_days(cfg: dict) -> int:
@@ -73,6 +76,12 @@ class ProbeEngine:
         self.results: dict = defaultdict(dict)
         self.history: dict = {}
         self._lock = threading.Lock()
+        # Last RECENT_CACHE_HOURS of raw samples per (host IP, probe), kept in RAM
+        # so the default chart views never touch the disk.  _recent_since[ip] is
+        # the oldest timestamp for which that host's cache is known to be complete.
+        self._recent: dict[tuple[str, str], deque] = {}
+        self._recent_since: dict[str, str] = {}
+        self._recent_lock = threading.Lock()
         self._stop = threading.Event()
         self._config_changed = threading.Event()
         self._threads: list[threading.Thread] = []
@@ -116,6 +125,68 @@ class ProbeEngine:
                     self.history[name] = deque(maxlen=20)
                 self.results[name].update(probes)
                 self.history[name].extend(pings)
+        self._sync_recent_cache({h["host"] for h in hosts})
+
+    # ── In-memory cache of recent raw samples ─────────────────────────────
+
+    def _recent_cutoff(self) -> str:
+        return (datetime.utcnow() - timedelta(hours=RECENT_CACHE_HOURS)).isoformat()
+
+    def _sync_recent_cache(self, ips: set[str]) -> None:
+        """Load the cache for newly configured hosts and drop removed ones."""
+        with self._recent_lock:
+            missing = [ip for ip in ips if ip not in self._recent_since]
+        for ip in missing:
+            cutoff = self._recent_cutoff()
+            series = {
+                probe: deque(storage.recent_payloads(ip, probe, cutoff))
+                for probe in CACHED_PROBES
+            }
+            with self._recent_lock:
+                self._recent_since[ip] = cutoff
+                for probe, rows in series.items():
+                    self._recent[(ip, probe)] = rows
+        with self._recent_lock:
+            for ip in [ip for ip in self._recent_since if ip not in ips]:
+                del self._recent_since[ip]
+                for probe in CACHED_PROBES:
+                    self._recent.pop((ip, probe), None)
+
+    def _cache_sample(self, ip: str, probe: str, ts: str, payload: str) -> None:
+        cutoff = self._recent_cutoff()
+        with self._recent_lock:
+            if ip not in self._recent_since:
+                return
+            series = self._recent.setdefault((ip, probe), deque())
+            series.append((ts, payload))
+            while series and series[0][0] < cutoff:
+                series.popleft()
+
+    def cached_recent(self, ip: str, probe: str, limit: int = 20,
+                      since: str | None = None, until: str | None = None) -> list[dict] | None:
+        """Same result as storage.recent(), served from RAM.
+
+        Returns None when the cache cannot answer exactly (unknown host, no
+        *since*, or *since* reaching back past what is cached); callers then
+        fall back to the database.
+        """
+        if not since:
+            return None
+        with self._recent_lock:
+            loaded_since = self._recent_since.get(ip)
+            if loaded_since is None or since < max(loaded_since, self._recent_cutoff()):
+                return None
+            items = list(self._recent.get((ip, probe), ()))
+        rows = []
+        for ts, payload in reversed(items):
+            if until and ts > until:
+                continue
+            if ts < since:
+                break
+            rows.append({"ts": ts, **json.loads(payload)})
+            if len(rows) >= limit:
+                break
+        return rows
 
     def reload_config(self, cfg: dict) -> None:
         """Hot-reload the config (e.g. after a web UI edit)."""
@@ -133,8 +204,10 @@ class ProbeEngine:
         ping_r = ping_probe.probe(host, count=self.cfg.get("ping_count", 10))
         tcp_r  = tcp_probe.probe(host, port=ssh_port)
 
-        storage.save(host, "ping", ping_r)
-        storage.save(host, "tcp",  tcp_r)
+        ping_ts, ping_payload = storage.save(host, "ping", ping_r)
+        tcp_ts, tcp_payload = storage.save(host, "tcp", tcp_r)
+        self._cache_sample(host, "ping", ping_ts, ping_payload)
+        self._cache_sample(host, "tcp", tcp_ts, tcp_payload)
 
         ts = datetime.utcnow().isoformat()
         with self._lock:
@@ -152,7 +225,8 @@ class ProbeEngine:
             duration=self.cfg.get("iperf3_duration", 5),
             iperf3_port=self.cfg.get("iperf3_port", 5201),
         )
-        storage.save(h["host"], "iperf3", r)
+        saved_ts, payload = storage.save(h["host"], "iperf3", r)
+        self._cache_sample(h["host"], "iperf3", saved_ts, payload)
         ts = datetime.utcnow().isoformat()
         with self._lock:
             self.results[name]["iperf3"] = {"ts": ts, **r}

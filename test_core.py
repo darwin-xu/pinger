@@ -31,6 +31,8 @@ class TestChecksumFileSelection(unittest.TestCase):
                 "test_core.py",
                 "requirements.txt",
                 "templates/index.html",
+                "static/vendor/lib.min.js",
+                "static/vendor/lib.min.js.map",
                 "probes/tcp.py",
                 "venv/lib/site.py",
                 "__pycache__/app.pyc",
@@ -50,6 +52,7 @@ class TestChecksumFileSelection(unittest.TestCase):
                 "checksum.py",
                 "probes/tcp.py",
                 "requirements.txt",
+                "static/vendor/lib.min.js",
                 "templates/index.html",
             ],
         )
@@ -487,6 +490,9 @@ class FakeEngine:
     def reload_config(self, cfg):
         self.cfg = cfg
 
+    def cached_recent(self, *args, **kwargs):
+        return None
+
 
 class TestAppApi(unittest.TestCase):
     def setUp(self):
@@ -708,6 +714,54 @@ class TestAppApi(unittest.TestCase):
         finally:
             app_module._checksum_cache = None
 
+    def test_history_prefers_the_ram_cache_and_reports_it_in_server_timing(self):
+        cached = [{"ts": "2026-01-01T00:00:00", "success": True, "avg": 5}]
+
+        with (
+            patch.object(app_module.engine, "cached_recent", return_value=cached),
+            patch.object(app_module.storage, "recent") as recent,
+        ):
+            resp = self.client.get("/api/history/Tokyo?since=2026-01-01T00:00:00&limit=7")
+
+        recent.assert_not_called()
+        self.assertEqual(resp.get_json()["ping"], cached)
+        timing = resp.headers["Server-Timing"]
+        self.assertIn('desc="memory"', timing)
+        self.assertIn("total;dur=", timing)
+
+    def test_history_falls_back_to_the_database_when_the_cache_cannot_answer(self):
+        with patch.object(app_module.storage, "recent", return_value=[]):
+            resp = self.client.get("/api/history/Tokyo?since=2026-01-01T00:00:00&limit=7")
+
+        self.assertIn('desc="db"', resp.headers["Server-Timing"])
+
+    def test_history_server_timing_for_rollup_windows(self):
+        with (
+            patch.object(app_module.storage, "rolled_series", return_value=([], [])),
+            patch.object(app_module.storage, "recent", return_value=[]),
+        ):
+            resp = self.client.get(
+                "/api/history/Tokyo?since=2026-01-01T00:00:00&until=2026-01-09T00:00:00"
+            )
+
+        self.assertIn('desc="rollup"', resp.headers["Server-Timing"])
+
+    def test_dashboard_serves_chart_js_itself_without_a_cdn(self):
+        with patch.object(app_module.engine, "snapshot", return_value=({}, {})):
+            html = self.client.get("/").get_data(as_text=True)
+
+        self.assertNotIn("cdn.jsdelivr", html)
+        self.assertNotIn("https://", "".join(
+            line for line in html.splitlines() if "<script" in line and "src=" in line
+        ))
+        for asset in ("vendor/chart-4.4.2.umd.min.js", "vendor/chartjs-adapter-date-fns-3.0.0.bundle.min.js"):
+            self.assertIn("/static/" + asset, html)
+            resp = self.client.get("/static/" + asset)
+            self.assertEqual(resp.status_code, 200, asset)
+            self.assertIn("javascript", resp.mimetype)
+        # Chart.js must be loaded before the page script that uses it
+        self.assertLess(html.index("chart-4.4.2.umd.min.js"), html.index("const ZOOM_LEVELS"))
+
     def test_version_uses_env_checksum_when_checksum_module_unavailable(self):
         old_compute = app_module.compute_repo_checksum
         old_env = os.environ.get("PINGER_CHECKSUM")
@@ -753,6 +807,9 @@ class TestEngineMaintenance(unittest.TestCase):
         }
         inst._stop = threading.Event()
         inst._lock = threading.Lock()
+        inst._recent = {}
+        inst._recent_since = {}
+        inst._recent_lock = threading.Lock()
         return inst
 
     def test_maintenance_rolls_up_each_host_once_then_prunes(self):
@@ -808,6 +865,7 @@ class TestEngineMaintenance(unittest.TestCase):
         with (
             patch.object(engine.storage, "latest", side_effect=fake_latest),
             patch.object(engine.storage, "recent", return_value=[{"success": True, "avg": 5.0}]),
+            patch.object(engine.storage, "recent_payloads", return_value=[]),
         ):
             inst._init_hosts()
 
@@ -815,6 +873,103 @@ class TestEngineMaintenance(unittest.TestCase):
         self.assertFalse(any(held))
         self.assertEqual(inst.results["A"]["ping"]["avg"], 5.0)
         self.assertEqual(list(inst.history["A"]), [5.0])
+
+
+class RecentCacheTestCase(unittest.TestCase):
+    """The RAM cache must answer exactly what storage.recent() would."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old_db_path = storage.DB_PATH
+        storage.close_all()
+        storage.DB_PATH = Path(self.tmp.name) / "metrics.db"
+        storage.init_db()
+        self.inst = object.__new__(engine.ProbeEngine)
+        self.inst.cfg = {"hosts": [{"name": "A", "host": "1.1.1.1"}]}
+        self.inst._lock = threading.Lock()
+        self.inst.results = engine.defaultdict(dict)
+        self.inst.history = {}
+        self.inst._recent = {}
+        self.inst._recent_since = {}
+        self.inst._recent_lock = threading.Lock()
+
+    def tearDown(self):
+        storage.close_all()
+        storage.DB_PATH = self.old_db_path
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _ago(**delta):
+        return (datetime.utcnow() - timedelta(**delta)).isoformat()
+
+    def _seed(self, ip, probe, ts, data):
+        storage._db().execute(
+            "INSERT INTO metrics (ts, host, probe, data) VALUES (?, ?, ?, ?)",
+            (ts, ip, probe, json.dumps(data)),
+        )
+        storage._db().commit()
+
+    def test_cache_matches_database_for_since_until_and_limit(self):
+        for minutes in (150, 90, 60, 30, 10):
+            self._seed("1.1.1.1", "ping", self._ago(minutes=minutes), {"success": True, "avg": minutes})
+        self._seed("1.1.1.1", "tcp", self._ago(minutes=20), {"success": False})
+        self.inst._sync_recent_cache({"1.1.1.1"})
+        since, until = self._ago(minutes=100)[:19], self._ago(minutes=15)[:19]
+
+        for probe in ("ping", "tcp"):
+            for kwargs in ({}, {"until": until}, {"limit": 2}, {"until": until, "limit": 1}):
+                expected = storage.recent("1.1.1.1", probe, since=since, **kwargs)
+                got = self.inst.cached_recent("1.1.1.1", probe, since=since, **kwargs) \
+                    if "limit" in kwargs else \
+                    self.inst.cached_recent("1.1.1.1", probe, limit=20, since=since, **kwargs)
+                self.assertEqual(got, expected, (probe, kwargs))
+
+    def test_cache_cannot_answer_without_since_for_unknown_hosts_or_beyond_its_coverage(self):
+        self.inst._sync_recent_cache({"1.1.1.1"})
+
+        self.assertIsNone(self.inst.cached_recent("1.1.1.1", "ping"))
+        self.assertIsNone(self.inst.cached_recent("9.9.9.9", "ping", since=self._ago(hours=1)))
+        self.assertIsNone(self.inst.cached_recent("1.1.1.1", "ping", since=self._ago(hours=30)))
+        self.assertEqual(self.inst.cached_recent("1.1.1.1", "ping", since=self._ago(hours=1)), [])
+
+    def test_new_samples_are_appended_and_old_ones_trimmed(self):
+        self.inst._sync_recent_cache({"1.1.1.1"})
+        self.inst._recent[("1.1.1.1", "ping")].append((self._ago(hours=25), '{"avg": 1}'))
+
+        self.inst._cache_sample("1.1.1.1", "ping", self._ago(minutes=1), '{"avg": 2}')
+
+        self.assertEqual([p for _, p in self.inst._recent[("1.1.1.1", "ping")]], ['{"avg": 2}'])
+
+    def test_samples_for_untracked_hosts_are_ignored(self):
+        self.inst._cache_sample("9.9.9.9", "ping", self._ago(minutes=1), "{}")
+
+        self.assertEqual(self.inst._recent, {})
+
+    def test_sync_loads_only_new_hosts_and_drops_removed_ones(self):
+        with patch.object(engine.storage, "recent_payloads", return_value=[]) as load:
+            self.inst._sync_recent_cache({"1.1.1.1"})
+            self.assertEqual(load.call_count, len(engine.CACHED_PROBES))
+            self.inst._sync_recent_cache({"1.1.1.1"})
+            self.assertEqual(load.call_count, len(engine.CACHED_PROBES))  # nothing reloaded
+            self.inst._sync_recent_cache({"2.2.2.2"})
+
+        self.assertEqual(set(self.inst._recent_since), {"2.2.2.2"})
+        self.assertEqual({ip for ip, _ in self.inst._recent}, {"2.2.2.2"})
+
+    def test_probe_cycle_writes_to_both_the_database_and_the_cache(self):
+        self.inst._sync_recent_cache({"1.1.1.1"})
+        host = self.inst.cfg["hosts"][0]
+        with (
+            patch.object(engine.ping_probe, "probe", return_value={"success": True, "avg": 12.5}),
+            patch.object(engine.tcp_probe, "probe", return_value={"success": True, "rtt": 3.5}),
+        ):
+            self.inst._probe_ping_tcp(host)
+        since = self._ago(minutes=5)[:19]
+
+        for probe in ("ping", "tcp"):
+            from_db = storage.recent("1.1.1.1", probe, limit=20, since=since)
+            self.assertEqual(len(from_db), 1)
+            self.assertEqual(self.inst.cached_recent("1.1.1.1", probe, limit=20, since=since), from_db)
 
 
 class TestEngineSnapshot(unittest.TestCase):

@@ -55,6 +55,7 @@ pinger/
 │   └── iperf3.py         # On-demand SSH + auto-install + iperf3
 ├── templates/
 │   └── index.html        # Web dashboard
+├── static/vendor/        # Self-hosted Chart.js + date adapter (see NOTICE.md); no CDN needed
 ├── deploy_iperf3.sh      # Optional: bulk-install iperf3 on many VPS
 └── requirements.txt
 ```
@@ -149,7 +150,7 @@ Scroll down to the **Settings** section on the web page to change probe interval
 
 Each run first prepares the host: it creates `~/pinger` and installs `rsync`, `python3`, and `python3-venv` via `apt` if they are missing (this needs sudo on the remote). A host without a virtual environment is always fully built, even when no files changed. SSH connections are shared across steps, so a password-only host asks for the password once per run. Setting up key-based login (`ssh-copy-id root@ubuntu-a.local`) avoids the prompt entirely.
 
-`deploy.sh` syncs the same deployable include list used by the runtime checksum. Inspect it with:
+`deploy.sh` syncs the same deployable include list used by the runtime checksum (`*.py`, `*.sh`, `*.html`, `requirements.txt`, and the vendored `static/*.js` charting libraries). Inspect it with:
 
 ```bash
 python3 checksum.py --files-only
@@ -256,7 +257,15 @@ A background maintenance thread (every 10 minutes, and once at startup) rolls ea
 - Pruning removes per-sample detail (min/max/p95) for data older than the cutoff; hourly means, loss, failure counts and failure timestamps are kept.
 - Rollups are computed for hosts currently in `config.yaml`; rows of removed hosts are left untouched.
 
-The dashboard only refetches the history chart in live mode when a new probe result has arrived (and at most about once per pixel of the visible window, capped at 5 minutes), and polling pauses while the browser tab is hidden.
+The dashboard only refetches the history chart in live mode when a new probe result has arrived (and at most about once per pixel of the visible window, capped at 5 minutes), never while another history request is still in flight, and polling pauses while the browser tab is hidden.
+
+### In-memory cache of recent samples
+
+The engine keeps the last 24 hours of raw ping/TCP/iperf3 samples for every configured host in RAM (about 1.5 MB per host at a 30 s probe interval, loaded from the database at startup and extended as probes run). Chart windows within the last 24 hours, which includes every default view, are answered from this cache without reading the database, so switching hosts does not depend on disk speed or a warm OS cache. Windows reaching back further fall back to the database or the hourly rollups. The `Server-Timing` header on `/api/history/<host>` reports which source answered (`memory`, `db` or `rollup`) and how long it took.
+
+### Timing diagnostics
+
+Open the dashboard with `?debug=1` (or run `localStorage.pingerDebug = '1'` in the console) to log each chart request to the browser console: time waiting for the server, download+parse, render, seconds since the previous history request, and the server's `Server-Timing` breakdown.
 
 The history charts use `probe_interval` to identify missing probe windows. When adjacent samples are separated by more than two probe intervals, the connecting segment is drawn thinner and lighter so downtime or dashboard gaps are not mistaken for normal measurements. Y-axes are anchored at zero so charts show the full range from 0 to the observed maximum instead of zooming into only the observed min/max band. For compatibility with older databases, iperf3 history is read by both the current host IP key and the display-name key. The TCP RTT failures legend shows the number of failed TCP probes in the current chart window and toggles the failure markers.
 On the 12h chart scale, x-axis labels include the date. On the 1mo scale, chart ticks align to the 1st of each month and the live range ends at the current time instead of a future month boundary.
@@ -274,3 +283,4 @@ On the 12h chart scale, x-axis labels include the date. On the 1mo scale, chart 
 | Download or upload Mbps shows `—` after a partial iperf3 success | That direction failed independently; download uses reverse mode (`iperf3 -R`) and can be blocked by firewall, NAT, provider policy, or a closed stream even when upload succeeds | Hover the `—` in the dashboard to see the direction-specific iperf3 error |
 | iperf3 error includes `remote server log` | The remote iperf3 server wrote diagnostic output before or during failure | Inspect `/tmp/pinger-iperf3-5201.log` on the VPS, replacing `5201` if you changed `iperf3_port` |
 | Dashboard not updating | Probe taking too long | Increase `probe_interval`; reduce `ping_count` |
+| Switching to a host is slow (especially the first switch after the page was idle) | Slow disk or cold cache on the server, network/mDNS latency, or a sleeping browser tab | Open the dashboard with `?debug=1` and check the browser console: each switch logs `wait` (network + server), `download+parse`, `render`, and the server's own breakdown (`Server-Timing`, e.g. `data;dur=1.2;desc="memory"`). Large `wait` with a small server `total` points to the network or name resolution; a large `data` with `desc="db"` points to the database |

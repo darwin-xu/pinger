@@ -362,8 +362,6 @@
         #chart-section canvas { max-width: 100%; }
     }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 </head>
 <body>
 
@@ -561,6 +559,10 @@
     </div>
 </div>
 
+<!-- Self-hosted (see static/vendor/NOTICE.md). Loaded after the page body so the page
+     paints first; not `defer`red because the inline script below uses Chart immediately. -->
+<script src="{{ url_for('static', filename='vendor/chart-4.4.2.umd.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/chartjs-adapter-date-fns-3.0.0.bundle.min.js') }}"></script>
 <script>
 // ── Chart state ───────────────────────────────────────────────────────────────
 const ZOOM_LEVELS = [
@@ -597,6 +599,17 @@ const COMPARE_METRICS = [
 let _lastCompareRender = null; // { hostDataList, winStart, winEnd }
 let _historyFetchAC  = null;   // AbortController for fetchAndRender
 let _compareFetchAC  = null;   // AbortController for fetchAndRenderCompare
+let _historyBusy = false;      // a history request is in flight (live refresh yields to it)
+let _compareBusy = false;
+let _lastHistoryAt = 0;
+
+// Timing diagnostics: open the page with ?debug=1 (or set localStorage.pingerDebug = '1')
+// and watch the console to see where a slow host switch spends its time.
+const DEBUG_TIMING = /[?&]debug=1\b/.test(location.search) || localStorage.getItem('pingerDebug') === '1';
+const ms = v => Math.round(v) + ' ms';
+function _logTiming(label, detail) {
+    if (DEBUG_TIMING) console.info('[pinger] ' + label + ': ' + detail);
+}
 
 function escAttr(s) {
     return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -811,7 +824,7 @@ function selectHost(name, idx) {
         // keep the previous server's labels visible until new data replaces them.
         const bar = document.getElementById('compare-metric-bar');
         if (bar && bar.childElementCount === 0) _buildStaticDedicatedLegend();
-        fetchAndRender(name);
+        fetchAndRender(name, 'switch');
     }
 }
 
@@ -840,9 +853,9 @@ function panRight()  {
 }
 function _applyZoom() {
     if (_chartMode === 'compare') {
-        _triggerCompare();
+        _triggerCompare('zoom');
     } else if (_selectedHost) {
-        fetchAndRender(_selectedHost);
+        fetchAndRender(_selectedHost, 'zoom');
     }
 }
 
@@ -872,7 +885,7 @@ function setChartMode(mode) {
         if (_charts['compare']) { _charts['compare'].destroy(); _charts['compare'] = null; }
         hostNameEl.textContent = _selectedHost || '';
         _buildStaticDedicatedLegend();
-        if (_selectedHost) fetchAndRender(_selectedHost);
+        if (_selectedHost) fetchAndRender(_selectedHost, 'mode');
     }
 }
 
@@ -963,24 +976,26 @@ function _getCompareHosts() {
     ).map(b => b.value).slice(0, 7);
 }
 
-function _triggerCompare() {
+function _triggerCompare(reason = 'user') {
     const zl = ZOOM_LEVELS[_zoomIdx];
     const liveEnd = _windowEnd || Date.now();
     const { winStart, winEnd } = zl.tickUnit === 'month'
         ? monthWindowForEnd(liveEnd)
         : { winStart: tickCeil(liveEnd, zl) - zl.windowMs, winEnd: tickCeil(liveEnd, zl) };
-    fetchAndRenderCompare(winStart, winEnd);
+    fetchAndRenderCompare(winStart, winEnd, reason);
     updateZoomControls(winStart, winEnd);
 }
 
-function fetchAndRenderCompare(winStart, winEnd) {
+function fetchAndRenderCompare(winStart, winEnd, reason = 'live') {
     // Cancel any previous in-flight compare requests.
     if (_compareFetchAC) { _compareFetchAC.abort(); }
     _compareFetchAC = new AbortController();
     const signal = _compareFetchAC.signal;
 
     const hosts = _getCompareHosts();
-    if (!hosts.length) return;
+    if (!hosts.length) { _compareBusy = false; return; }
+    _compareBusy = true;
+    const t0 = performance.now();
     const limit = Math.min(Math.ceil((winEnd - winStart) / Math.max(PROBE_INTERVAL_MS, 1000)) + 200, 50000);
     const since = new Date(winStart).toISOString().slice(0, 19);
     const until = new Date(winEnd).toISOString().slice(0, 19);
@@ -993,8 +1008,11 @@ function fetchAndRenderCompare(winStart, winEnd) {
             .catch(err => { if (err.name !== 'AbortError') {} return null; })
     )).then(results => {
         if (signal.aborted) return;
+        const tFetched = performance.now();
         renderCompareChart(results.filter(Boolean), winStart, winEnd);
-    }).catch(() => {});
+        _logTiming('compare ' + hosts.length + ' hosts (' + reason + ')',
+            'fetch ' + ms(tFetched - t0) + ' · render ' + ms(performance.now() - tFetched));
+    }).catch(() => {}).finally(() => { if (_compareFetchAC && _compareFetchAC.signal === signal) _compareBusy = false; });
 }
 
 function renderCompareChart(hostDataList, winStart, winEnd) {
@@ -1099,12 +1117,13 @@ function renderCompareChart(hostDataList, winStart, winEnd) {
     });
 }
 
-function fetchAndRender(name) {
+function fetchAndRender(name, reason = 'live') {
     // Cancel any previous in-flight history request so stale responses never
     // overwrite the chart after the user has already switched host or scale.
     if (_historyFetchAC) { _historyFetchAC.abort(); }
     _historyFetchAC = new AbortController();
     const signal = _historyFetchAC.signal;
+    _historyBusy = true;
 
     const zl     = ZOOM_LEVELS[_zoomIdx];
     const liveEnd = _windowEnd || Date.now();
@@ -1116,15 +1135,32 @@ function fetchAndRender(name) {
     const limit    = Math.min(Math.ceil((winEnd - winStart) / Math.max(PROBE_INTERVAL_MS, 1000)) + 200, 50000);
     const since    = new Date(winStart).toISOString().slice(0, 19); // naive UTC prefix
     const until    = new Date(winEnd).toISOString().slice(0, 19);   // naive UTC prefix
+    const t0 = performance.now();
+    const idleS = _lastHistoryAt ? Math.round((Date.now() - _lastHistoryAt) / 1000) : null;
+    let tHead = t0, serverTiming = '';
     fetch('/api/history/' + encodeURIComponent(name) +
                 '?since=' + encodeURIComponent(since) + '&until=' + encodeURIComponent(until) + '&limit=' + limit,
           { signal })
-        .then(r => r.json())
+        .then(r => {
+            tHead = performance.now();
+            serverTiming = r.headers.get('Server-Timing') || '';
+            return r.json();
+        })
         .then(data => {
+            const tBody = performance.now();
             ['latency', 'bandwidth'].forEach(tab => renderChart(name, tab, data, winStart, winEnd));
             updateZoomControls(winStart, winEnd);
+            _lastHistoryAt = Date.now();
+            _logTiming(name + ' (' + reason + ')',
+                'wait ' + ms(tHead - t0) + ' · download+parse ' + ms(tBody - tHead) +
+                ' · render ' + ms(performance.now() - tBody) +
+                ' · idle ' + (idleS === null ? 'n/a' : idleS + 's') +
+                (serverTiming ? ' · server: ' + serverTiming : ''));
         })
-        .catch(err => { if (err.name !== 'AbortError') {} });
+        .catch(err => {
+            if (err.name === 'AbortError') _logTiming(name + ' (' + reason + ')', 'aborted by a newer request after ' + ms(performance.now() - t0));
+        })
+        .finally(() => { if (_historyFetchAC && _historyFetchAC.signal === signal) _historyBusy = false; });
 }
 
 function updateZoomControls(winStart, winEnd) {
@@ -1541,12 +1577,13 @@ function refreshDashboard() {
                 _lastTableSig = tableSig;
                 renderHostRows(tbody, data);
             }
-            // Silently refresh history chart in live mode
-            if (_windowEnd === null && _liveChartRefreshDue(data)) {
+            // Silently refresh history chart in live mode.  Yield to a request the
+            // user just triggered instead of aborting and restarting it.
+            if (_windowEnd === null && !_historyBusy && !_compareBusy && _liveChartRefreshDue(data)) {
                 if (_chartMode === 'compare') {
-                    _triggerCompare();
+                    _triggerCompare('live');
                 } else if (_selectedHost) {
-                    fetchAndRender(_selectedHost);
+                    fetchAndRender(_selectedHost, 'live');
                 }
             }
         })

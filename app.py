@@ -226,8 +226,19 @@ def api_version():
 
 # ── History API ───────────────────────────────────────────────────
 
+def _recent_rows(host_ip: str, probe: str, limit: int, since, until, sources: set) -> list[dict]:
+    """Raw rows from the engine's RAM cache when it can answer, else the database."""
+    cached = engine.cached_recent(host_ip, probe, limit=limit, since=since, until=until)
+    if cached is not None:
+        sources.add("memory")
+        return cached
+    sources.add("db")
+    return storage.recent(host_ip, probe, limit=limit, since=since, until=until)
+
+
 @app.route("/api/history/<host>")
 def api_history(host: str):
+    started = time.perf_counter()
     # Resolve display name → IP so history is stable across renames
     cfg = _cfg()
     matched = next((h for h in cfg.get("hosts", []) if h["name"] == host), None)
@@ -237,29 +248,41 @@ def api_history(host: str):
     since = request.args.get("since") or None
     until = request.args.get("until") or None
     rollup = _wants_rollup(since, until, retention_days(cfg))
-    iperf3_by_ip = storage.recent(host_ip, "iperf3", limit=limit, since=since, until=until)
+    sources: set[str] = set()
+    iperf3_by_ip = _recent_rows(host_ip, "iperf3", limit, since, until, sources)
+    # Rows keyed by display name only come from old versions; they cannot fall in a
+    # window the cache covers (the last 24 h), so skip that lookup when it answered.
     iperf3_by_name = (
         storage.recent(host_name, "iperf3", limit=limit, since=since, until=until)
-        if host_name != host_ip else []
+        if host_name != host_ip and "memory" not in sources else []
     )
     iperf3 = _merge_recent(iperf3_by_ip, iperf3_by_name, limit=limit)
     if rollup:
         # Wide window: hourly rollups, so the payload and query cost no longer
         # grow with the window or the age of the database.
+        sources = {"rollup"}
         ping, _ = storage.rolled_series(host_ip, "ping", since, until, ROLLUP_MAX_POINTS)
         tcp, tcp_failed = storage.rolled_series(host_ip, "tcp", since, until, ROLLUP_MAX_POINTS)
         iperf3 = storage.downsample_rows(iperf3, since, until, ROLLUP_MAX_POINTS)
     else:
-        ping = storage.recent(host_ip, "ping", limit=limit, since=since, until=until)
-        tcp = storage.recent(host_ip, "tcp", limit=limit, since=since, until=until)
+        ping = _recent_rows(host_ip, "ping", limit, since, until, sources)
+        tcp = _recent_rows(host_ip, "tcp", limit, since, until, sources)
         tcp_failed = [{"ts": r["ts"], "count": 1} for r in tcp if r.get("success") is False]
-    return jsonify(
+    data_ms = (time.perf_counter() - started) * 1000
+    resp = jsonify(
         ping=ping,
         tcp=tcp,
         iperf3=iperf3,
         tcp_failed=tcp_failed,
         resolution="rollup" if rollup else "raw",
     )
+    # Visible in the browser's Network → Timing panel; shows whether time went to
+    # the database/cache or elsewhere (network, browser).
+    resp.headers["Server-Timing"] = (
+        f'data;dur={data_ms:.1f};desc="{"+".join(sorted(sources))}", '
+        f"total;dur={(time.perf_counter() - started) * 1000:.1f}"
+    )
+    return resp
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────

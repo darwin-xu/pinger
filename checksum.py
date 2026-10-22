@@ -22,6 +22,7 @@ INCLUDE_FILE_PATTERNS = (
     "**/*.sh",
     "**/*.html",
     "requirements.txt",
+    "static/*.js",  # vendored browser libraries (fnmatch's * also crosses "/")
 )
 
 EXCLUDE_PATTERNS = (

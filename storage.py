@@ -137,14 +137,27 @@ def init_db() -> None:
         conn.commit()
 
 
-def save(host: str, probe: str, data: dict) -> None:
+def save(host: str, probe: str, data: dict) -> tuple[str, str]:
+    """Persist a sample; returns the (ts, json payload) that was stored."""
+    ts = datetime.utcnow().isoformat()
+    payload = json.dumps(data)
     with _lock:
         conn = _db()
         conn.execute(
             "INSERT INTO metrics (ts, host, probe, data) VALUES (?, ?, ?, ?)",
-            (datetime.utcnow().isoformat(), host, probe, json.dumps(data)),
+            (ts, host, probe, payload),
         )
         conn.commit()
+    return ts, payload
+
+
+def recent_payloads(host: str, probe: str, since: str) -> list[tuple[str, str]]:
+    """Raw (ts, json payload) rows with ts >= *since*, oldest first."""
+    with _read() as conn:
+        return conn.execute(
+            "SELECT ts, data FROM metrics WHERE host=? AND probe=? AND ts >= ? ORDER BY ts",
+            (host, probe, since),
+        ).fetchall()
 
 
 def recent(host: str, probe: str, limit: int = 20,
